@@ -9,7 +9,6 @@ typedef int bool;
 struct list_elem {
 	struct list_elem *prev;     /* Previous list element. */
 	struct list_elem *next;     /* Next list element. */
-    struct unit d;
 };
 
 /* List */
