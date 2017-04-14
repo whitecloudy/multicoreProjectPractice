@@ -8,6 +8,8 @@
 #define LIVE 1
 #define PLAGUE_D 2
 #define PLAGUE_L 3
+#define DEAD_TO_LIVE 4
+#define LIVE_TO_DEAD 5
 
 #define plagued 2
 #define deplagued -2
@@ -144,7 +146,83 @@ void devil_mov(struct setup * s, int x ,int y, int z, struct devil * d)
 	unit_mov(s,x,y,z,d->cor);
 	//들어온 devil 넣기
 	map[d->cor.x][d->cor.y][d->cor.z].d = d;
-	
+}
+
+/***************************************************************
+ * 입력받은 좌표의 셀 주위를 확인한 후 live or dead를 결정
+ * ********************************************************/
+void cell_check(struct setup * s, int x, int y, int z)
+{
+	int i,j,k;
+	int p,q,r;
+	int count = 0;
+
+	//테두리 체크
+	if(x==0)
+		i=0;
+	else
+		i=-1;
+	if(x==s->map_size-1)
+		p=0;
+	else
+		p=1;
+	if(y==0)
+		j=0;
+	else
+		j=-1;
+	if(y==s->map_size-1)
+		q=0;
+	else
+		q=1;
+	if(z==0)
+		k=0;
+	else
+		k=-1;
+	if(z==s->map_size-1)
+		r=0;
+	else
+		r=1;
+
+	//DEAD, LIVE 카운트
+	if(map[x][y][z].status == DEAD)	//DEAD일 경우
+	{
+		//이웃 셀 중 LIVE인 것들을 체크
+		for(;i<=p;i++)
+		{
+			for(j;j<=q;j++)
+			{
+				for(k;k<=r;k++)
+				{
+					if((map[x+i][y+j][z+k].status % 4) == LIVE)
+						count++;
+				}
+			}
+		}
+		//카운트 된 것 확인 후 만약 조건 부합시 DEAD_TO_LIVE로
+		if((count > s->live_min)&&(count < s->live_max))
+		{
+			map[x][y][z].status += 4;
+		}
+	}else if(map[x][y][z].status == LIVE)	//LIVE일 경우
+	{			
+		//이웃 셀 중 DEAD인 것들을 체크
+		for(i=-1;i<=1;i++)
+		{
+			for(j=-1;j<=1;j++)
+			{
+				for(k=-1;k<=1;k++)
+				{
+					if((map[x+i][y+j][z+k].status % 4) == DEAD)
+						count++;
+				}
+			}
+		}
+		//카운트 된 것 확인 후 만약 조건 부합시 LIVE_TO_DEAD로
+		if((count > s->dead_max)||(count < s->dead_min))
+		{
+			map[x][y][z].status += 4;
+		}
+	}
 }
 
 //임의 정의 함수
@@ -238,11 +316,38 @@ void devil_stage (struct setup *s) {
 	{
 		tem = (devil*)malloc(sizeof(devil));
 		devil_init(tem);
+		size++;
 	}
 }
 
 void live_dead_stage (struct setup *s) {
+	int i,j,k;
+	//각 셀을 돌아가면서 확인
+	for(i = 0;i<s->map_size;i++)
+	{
+		for(j=0;j<s->map_size;j++)
+		{
+			for(k=0;k<s->map_size;k++)
+			{
+				cell_check(s,i,j,k);
+			}
+		}
+	}
 
+	//확인이 끝나면 변경해야 될 셀들을 찾아서 변경
+	for(i = 0;i<s->map_size;i++)
+	{
+		for(j=0;j<s->map_size;j++)
+		{
+			for(k=0;k<s->map_size;k++)
+			{
+				if(map[i][j][k] ==DEAD_TO_LIVE)
+					map[i][j][k] = LIVE;
+				else if(map[i][j][k] == LIVE_TO_DEAD)
+					map[i][j][k] = DEAD;
+			}
+		}
+	}
 }
 
 void plague_stage (struct setup *s) {
