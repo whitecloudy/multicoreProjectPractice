@@ -4,6 +4,7 @@
 typedef int bool;
 #define true 1
 #define false 0
+#include "./game.h"
 
 struct list_elem {
 	struct list_elem *prev;     /* Previous list element. */
