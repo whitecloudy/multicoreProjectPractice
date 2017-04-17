@@ -41,7 +41,7 @@ struct MAP *** map;
 struct unit angel;
 struct list devil_list;
 int devil_size=0;
-
+int sort = 0;
 
 /***************************************
  * 3차원 메모리를 동적할당
@@ -310,61 +310,36 @@ int compare(struct unit A, struct unit B)
 
 void devil_sort(struct list_elem * start, struct list_elem * end)
 {
-	struct unit pivot;
+	struct list_elem * tem;
 	struct list_elem * p = start;
-	struct devil * pD = list_entry(start,struct devil, el);
-	struct list_elem * q = end;
-	struct devil * qD = list_entry(end,struct devil, el);
+	struct list_elem * q = list_next(p);
+	struct devil * pD = list_entry(p,struct devil,el);
+	struct devil * qD = list_entry(q,struct devil, el);
 
+	int i,j;
 
-	//피벗 초기화
-	pivot.x = pD->cor.x;
-	pivot.y = pD->cor.y;
-	pivot.z = pD->cor.z;
-
-	while(1)
+	for(i=1;i<devil_size;i++)
 	{
-		while(compare(pD->cor,pivot))
+		for(j=i;j<devil_size;j++)
 		{
-			if(p==q)
-				break;
-			p = list_next(p);
+			if( !compare(pD->cor,qD->cor) )
+			{
+				sort++;
+				list_swap(p,q);
+				q = list_next(p);
+			}else
+			{
+				p = q;
+				q = list_next(p);
+			}
 			pD = list_entry(p,struct devil,el);
-		}
-
-		while(compare(pivot, qD->cor))
-		{
-			if(p==q)
-				break;
-			q = list_prev(q);
 			qD = list_entry(q,struct devil,el);
 		}
-
-		if(p == q)
-		{
-			q = list_prev(q);
-			break;
-		}else if(p == q->next)
-		{
-			break;
-		}else
-		{
-			list_swap(p,q);
-			p = (unsigned long)p^(unsigned long)q;
-			q = (unsigned long)p^(unsigned long)q;
-			p = (unsigned long)p^(unsigned long)q;
-			p = list_next(p);
-			pD = list_entry(p,struct devil,el);
-			q = list_prev(q);
-			qD = list_entry(q,struct devil,el);
-		}
+		p = find_elem(&devil_list,i);
+		p = list_next(tem);
+		q = list_next(p);
 	}
-	if(start->prev !=q)
-		devil_sort(start,q);
-	if(end->next != p)
-		devil_sort(p,end);
 }
-
 /*********************************************
  * 맵을 입력받은 파일에 저장하는 함수
  ******************************************/
@@ -718,7 +693,7 @@ void print_fin_map (struct setup *s) {
 
 void print_fin_pos (struct setup *s) {
 	FILE * file = fopen("Final_pos.txt","w");
-	devil_sort(list_begin(&devil_list),list_end(&devil_list));
+	devil_sort(list_begin(&devil_list),list_end(&devil_list)->prev);
 	pos_print(s,file);
 	fclose(file);
 
