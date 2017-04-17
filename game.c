@@ -50,21 +50,34 @@ int devil_size=0;
  * **************************************/
 void *** malloc_3d(int num,int size)
 {
-    void *** data;
-    int i,j;
+	void *** data;
+	int i, j;
+	data = (void***)malloc(sizeof(void**)*num);
+	data[0] = (void**)malloc(sizeof(void*)*num*num);
+	data[0][0] = (void*)malloc(size*num*num*num);
+	for (i = 1; i < num; i++)
+	{
+		data[i] = data[i - 1] + num;
+		data[i][0] = (unsigned long)data[i - 1][0] + (unsigned long)(num*num*size);
+	}
+	for (i = 0; i < num; i++)
+	{
+		for (j = 1; j < num; j++)
+		{
+			data[i][j] = (unsigned long)data[i][j - 1] + (unsigned long)(num*size);
+		}
+	}
+	return data;
+}
 
-    
-    data = (void***)malloc(sizeof(void**)*num);
-
-    for(i = 0;i<size;i++)
-    {
-        data[i] = (void**)malloc(sizeof(void*)*num);
-        for(j = 0; j<size;j++)       
-        {           
-            data[i][j] = (void*)malloc(size*num);
-        }
-    }
-    return data;
+/*********************************************
+ * 3차원 메모리 동적할당 해제
+ * ******************************************/
+void free_3d(void *** data)
+{
+	free(data[0][0]);
+	free(data[0]);
+	free(data);
 }
 
 /**********************************************
@@ -91,7 +104,7 @@ void devil_init(struct setup *s, struct devil* d)
  * ***********************************************/
 struct devil * devil_remove(struct devil *d)
 {
-	struct devil * next = list_entry(list_next(d),struct devil,el);
+	struct devil * next = list_entry(list_next(&(d->el)),struct devil,el);
 	list_remove(&(d->el));
 	free(d);
 	return next;
@@ -272,13 +285,126 @@ void cell_transmit(struct setup * s, int x, int y, int z)
 		{
 			for(k=zs;k<=r;k++)
 			{
-				if(map[x+i][y+j][z+k].status == DEAD)
-					map[x+i][y+j][z+k].status +=changed;
-				if(map[x+i][y+j][z+k].status == LIVE)
-					map[x+i][y+j][z+k].status +=changed;
-
+				if(map[x+i][y+j][z+k].status<2)
+					map[x+i][y+j][z+k].status += changed;
 			}
 		}
+	}
+}
+
+int compare(struct unit A, struct unit B)
+{
+	if(A.x > B.x)
+		return 0;
+	else if(A.x < B.x)
+		return 1;
+	else if(A.y > B.y)
+		return 0;
+	else if(A.y < B.y)
+		return 1;
+	else if(A.z > B.z)
+		return 0;
+	else
+		return 1;
+}
+
+void devil_sort(struct list_elem * start, struct list_elem * end)
+{
+	struct unit pivot;
+	struct list_elem * p = start;
+	struct devil * pD = list_entry(start,struct devil, el);
+	struct list_elem * q = end;
+	struct devil * qD = list_entry(end,struct devil, el);
+
+
+	//피벗 초기화
+	pivot.x = pD->cor.x;
+	pivot.y = pD->cor.y;
+	pivot.z = pD->cor.z;
+
+	while(1)
+	{
+		while(compare(pD->cor,pivot))
+		{
+			if(p==q)
+				break;
+			p = list_next(p);
+			pD = list_entry(p,struct devil,el);
+		}
+
+		while(compare(pivot, qD->cor))
+		{
+			if(p==q)
+				break;
+			q = list_prev(q);
+			qD = list_entry(q,struct devil,el);
+		}
+
+		if(p == q)
+		{
+			q = list_prev(q);
+			break;
+		}else if(p == q->next)
+		{
+			break;
+		}else
+		{
+			list_swap(p,q);
+			p = (unsigned long)p^(unsigned long)q;
+			q = (unsigned long)p^(unsigned long)q;
+			p = (unsigned long)p^(unsigned long)q;
+			p = list_next(p);
+			pD = list_entry(p,struct devil,el);
+			q = list_prev(q);
+			qD = list_entry(q,struct devil,el);
+		}
+	}
+	if(start->prev !=q)
+		devil_sort(start,q);
+	if(end->next != p)
+		devil_sort(p,end);
+}
+
+/*********************************************
+ * 맵을 입력받은 파일에 저장하는 함수
+ ******************************************/
+void map_print(struct setup * s, FILE * save)
+{
+	int i,j,k;
+	for(i=0;i<s->map_size;i++)
+	{
+		for(j=0;j<s->map_size;j++)
+		{
+			for(k=0;k<s->map_size;k++)
+			{
+				if(map[i][j][k].status == LIVE)
+					fprintf(save,"L ");
+				else if(map[i][j][k].status == DEAD)
+					fprintf(save,"D ");
+				else if((map[i][j][k].status == PLAGUE_D)||(map[i][j][k].status==PLAGUE_L))
+					fprintf(save,"P ");
+			}
+			fprintf(save,"\n");
+		}
+		fprintf(save,"\n");
+	}
+}
+
+/************************************************
+ * 엔젤과 데빌의 위치를 파일에 저장하는 함수
+ * *********************************************/
+void pos_print(struct setup * s, FILE * save)
+{
+	struct devil * d=list_entry(list_begin(&devil_list),struct devil,el);
+	int i;
+
+	fprintf(save,"[Angel]\n");
+	fprintf(save, "(%d, %d, %d)\n\n",angel.x, angel.y, angel.z);
+	fprintf(save,"[Devil]\n");
+	for(i=0;i<devil_size;i++)
+	{
+		fprintf(save, "(%d, %d, %d)\n",d->cor.x,d->cor.y,d->cor.z);
+		d = list_entry(list_next(&(d->el)),struct devil, el);
 	}
 }
 
@@ -289,6 +415,7 @@ void cell_transmit(struct setup * s, int x, int y, int z)
 void init_resources (struct setup *s) {
     int i,j,k;
     int p = (s->map_size/2)-1;
+	struct devil * tem;
 
     //맵 데이터 동적할당
     map = (struct MAP ***)malloc_3d(s->map_size,sizeof(struct MAP));
@@ -314,6 +441,15 @@ void init_resources (struct setup *s) {
 
     //devil list 초기화
     list_init(&devil_list);
+
+	//새로운 devil생성
+	tem = (struct devil*)malloc(sizeof(struct devil));
+	devil_init(s,tem);
+	devil_size++;
+
+	//해당 devil지역 plague화
+	map[tem->cor.x][tem->cor.y][tem->cor.z].status+=plagued;
+
 }
 
 void devil_stage (struct setup *s) {
@@ -360,7 +496,7 @@ void devil_stage (struct setup *s) {
 					map[tem->cor.x][tem->cor.y][tem->cor.z].status+=plagued;
 
 				//다음 devil을 가져옴
-				tem = list_entry(list_next(tem),struct devil,el);
+				tem = list_entry(list_next(&(tem->el)),struct devil,el);
 			}
         }
     }
@@ -445,6 +581,9 @@ void angel_stage (struct setup *s) {
 	
 	int i,j,k,p,q,r,num, biggest=0;
 	int xP=0,xM=0,yP=0,yM=0,zP=0,zM=0;
+
+	if((moveLength/2)>scope)
+		scope = moveLength/2;
 
 	//최초 데빌을 지목
 	struct devil * cursor= list_entry(list_begin(&devil_list),struct devil,el);
@@ -558,21 +697,41 @@ void angel_stage (struct setup *s) {
 
 
 void print_init_map (struct setup *s) {
-
+	FILE * file = fopen("Inital_map.txt","w");
+	map_print(s,file);
+	fclose(file);
 }
 
 void print_init_pos (struct setup *s) {
+	FILE * file = fopen("Inital_pos.txt","w");
+	pos_print(s,file);
+	fclose(file);
 
 }
 
 void print_fin_map (struct setup *s) {
+	FILE * file = fopen("Final_map.txt","w");
+	map_print(s,file);
+	fclose(file);
 
 }
 
 void print_fin_pos (struct setup *s) {
+	FILE * file = fopen("Final_pos.txt","w");
+	devil_sort(list_begin(&devil_list),list_end(&devil_list));
+	pos_print(s,file);
+	fclose(file);
 
 }
 
 void free_resources (struct setup *s) {
+	struct devil * d = list_entry(list_begin(&devil_list),struct devil,el);
+	int i = 0;
+	free_3d(map);
 
+	for(;i<devil_size;i++)
+	{
+		d = devil_remove(d);
+	}
+	devil_size = 0;
 }
