@@ -42,6 +42,7 @@ struct unit angel;
 struct list devil_list;
 int devil_size=0;
 int sort = 0;
+int sort1 = 0;
 
 /***************************************
  * 3차원 메모리를 동적할당
@@ -95,7 +96,8 @@ void devil_init(struct setup *s, struct devil* d)
 	map[d->cor.x][d->cor.y][d->cor.z].d = d;
 	//devil 리스트 입력
 	list_push_back(&devil_list,&(d->el));
-        
+
+	devil_size++;
 }
 
 /*************************************************
@@ -107,6 +109,7 @@ struct devil * devil_remove(struct devil *d)
 	struct devil * next = list_entry(list_next(&(d->el)),struct devil,el);
 	list_remove(&(d->el));
 	free(d);
+	devil_size--;
 	return next;
 }
 
@@ -310,21 +313,27 @@ int compare(struct unit A, struct unit B)
 
 void devil_sort(struct list_elem * start, struct list_elem * end)
 {
-	struct list_elem * tem;
 	struct list_elem * p = start;
 	struct list_elem * q = list_next(p);
 	struct devil * pD = list_entry(p,struct devil,el);
 	struct devil * qD = list_entry(q,struct devil, el);
 
 	int i,j;
+/*
+	for(i=0;i<devil_size;i++)
+	{
+		printf("%x %x\n",find_elem(&devil_list,i)->prev,find_elem(&devil_list,i)->next);
+	}
+	*/
 
 	for(i=1;i<devil_size;i++)
 	{
+		sort1++;
 		for(j=i;j<devil_size;j++)
 		{
+			sort++;
 			if( !compare(pD->cor,qD->cor) )
 			{
-				sort++;
 				list_swap(p,q);
 				q = list_next(p);
 			}else
@@ -336,8 +345,11 @@ void devil_sort(struct list_elem * start, struct list_elem * end)
 			qD = list_entry(q,struct devil,el);
 		}
 		p = find_elem(&devil_list,i);
-		p = list_next(tem);
 		q = list_next(p);
+		for(i=0;i<devil_size;i++)
+		{
+			printf("%x %x\n",find_elem(&devil_list,i)->prev,find_elem(&devil_list,i)->next);
+		}
 	}
 }
 /*********************************************
@@ -420,7 +432,6 @@ void init_resources (struct setup *s) {
 	//새로운 devil생성
 	tem = (struct devil*)malloc(sizeof(struct devil));
 	devil_init(s,tem);
-	devil_size++;
 
 	//해당 devil지역 plague화
 	map[tem->cor.x][tem->cor.y][tem->cor.z].status+=plagued;
@@ -437,7 +448,6 @@ void devil_stage (struct setup *s) {
         //새로운 devil생성
         tem = (struct devil*)malloc(sizeof(struct devil));
         devil_init(s,tem);
-		devil_size++;
 
         //해당 devil지역 plague화
 		if(map[tem->cor.x][tem->cor.y][tem->cor.z].status<2)	//만약 해당 지역이 plague가 아니라면
@@ -456,11 +466,10 @@ void devil_stage (struct setup *s) {
 
         for(i=0;i<num;i++)
         {
-			//지목된 devil이 가지고 있는 해당 위치의 devil포인터가 현 devil와 다르다면 중첩된 것으로 판단
+			//지목된 devil이 가지고 있는 해당 위치의 devil포인터가 다르면 해당 데빌이 삭제됬다고 판단
 			if(map[tem->cor.x][tem->cor.y][tem->cor.z].d != tem)
 			{
 				tem = devil_remove(tem);	//데빌 삭제
-				devil_size--;
 			}else
 			{
 				//devil을 이동
@@ -483,7 +492,6 @@ void devil_stage (struct setup *s) {
 	{
 		tem = (struct devil*)malloc(sizeof(struct devil));
 		devil_init(s,tem);
-		devil_size++;
 	}
 }
 
@@ -708,5 +716,4 @@ void free_resources (struct setup *s) {
 	{
 		d = devil_remove(d);
 	}
-	devil_size = 0;
 }
