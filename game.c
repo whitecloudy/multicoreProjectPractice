@@ -311,7 +311,22 @@ int compare(struct unit A, struct unit B)
 		return 1;
 }
 
-void devil_sort(struct list_elem * start, struct list_elem * end)
+void swap(struct list_elem *a, struct list_elem * b)
+{
+	struct list_elem *a_prev = a->prev;
+	struct list_elem *a_next = a->next;
+	struct list_elem *b_prev = b->prev;
+	struct list_elem *b_next = b->next;
+
+	a->prev = b;
+	a->next = b_next;
+	b->prev = a_prev;
+	b->next = a;
+	a_prev->next = b;
+	b_next->prev = a;
+}
+
+void devil_sort(struct list_elem * start)
 {
 	struct list_elem * p = start;
 	struct list_elem * q = list_next(p);
@@ -319,22 +334,14 @@ void devil_sort(struct list_elem * start, struct list_elem * end)
 	struct devil * qD = list_entry(q,struct devil, el);
 
 	int i,j;
-/*
-	for(i=0;i<devil_size;i++)
-	{
-		printf("%x %x\n",find_elem(&devil_list,i)->prev,find_elem(&devil_list,i)->next);
-	}
-	*/
 
 	for(i=1;i<devil_size;i++)
 	{
-		sort1++;
-		for(j=i;j<devil_size;j++)
+		for(j=0;j<devil_size-i;j++)
 		{
-			sort++;
 			if( !compare(pD->cor,qD->cor) )
 			{
-				list_swap(p,q);
+				swap(p,q);
 				q = list_next(p);
 			}else
 			{
@@ -344,14 +351,13 @@ void devil_sort(struct list_elem * start, struct list_elem * end)
 			pD = list_entry(p,struct devil,el);
 			qD = list_entry(q,struct devil,el);
 		}
-		p = find_elem(&devil_list,i);
+		p = list_begin(&devil_list);
 		q = list_next(p);
-		for(i=0;i<devil_size;i++)
-		{
-			printf("%x %x\n",find_elem(&devil_list,i)->prev,find_elem(&devil_list,i)->next);
-		}
+		pD = list_entry(p,struct devil,el);
+		qD = list_entry(q,struct devil,el);
 	}
 }
+
 /*********************************************
  * 맵을 입력받은 파일에 저장하는 함수
  ******************************************/
@@ -701,7 +707,7 @@ void print_fin_map (struct setup *s) {
 
 void print_fin_pos (struct setup *s) {
 	FILE * file = fopen("Final_pos.txt","w");
-	devil_sort(list_begin(&devil_list),list_end(&devil_list)->prev);
+	devil_sort(list_begin(&devil_list));
 	pos_print(s,file);
 	fclose(file);
 
