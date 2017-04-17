@@ -213,6 +213,10 @@ void cell_check(struct setup * s, int x, int y, int z)
 			{
 				for(k=zs;k<=r;k++)
 				{
+					//자기자신은 세지 않는다
+					if((i==0)&&(j==0)&&(k==0))
+						break;
+					//라이브 셀 카운트
 					if((map[x+i][y+j][z+k].status % changed) == LIVE)
 						count++;
 				}
@@ -231,14 +235,17 @@ void cell_check(struct setup * s, int x, int y, int z)
 			for(j=ys;j<=q;j++)
 			{
 				for(k=zs;k<=r;k++)
-				{
+				{	//자기자신은 세지 않는다
+					if((i==0)&&(j==0)&&(k==0))
+						break;
+					//데드 셀 카운트
 					if((map[x+i][y+j][z+k].status % changed) == DEAD)
 						count++;
 				}
 			}
 		}
 		//카운트 된 것 확인 후 만약 조건 부합시 LIVE_TO_DEAD로
-		if((count > s->dead_max)||(count < s->dead_min))
+		if((count > s->dead_max)&&(count < s->dead_min))
 		{
 			map[x][y][z].status += changed;
 		}
@@ -295,6 +302,10 @@ void cell_transmit(struct setup * s, int x, int y, int z)
 	}
 }
 
+/*****************************************************
+ * A와 B를 비교하는 함수
+ * return : B가 더 크거나 같으면 1 A가 더 크면 0을 반환
+ * ***************************************************/
 int compare(struct unit A, struct unit B)
 {
 	if(A.x > B.x)
@@ -311,7 +322,10 @@ int compare(struct unit A, struct unit B)
 		return 1;
 }
 
-void swap(struct list_elem *a, struct list_elem * b)
+/********************************************************
+ * 근접한 두개의 list_elem의 위치를 바꾸는 함수
+ * ****************************************************/
+void close_swap(struct list_elem *a, struct list_elem * b)
 {
 	struct list_elem *a_prev = a->prev;
 	struct list_elem *a_next = a->next;
@@ -326,6 +340,9 @@ void swap(struct list_elem *a, struct list_elem * b)
 	b_next->prev = a;
 }
 
+/***************************************************
+ * 데빌 리스트를 정렬하는 함수
+ **************************************************/
 void devil_sort(struct list_elem * start)
 {
 	struct list_elem * p = start;
@@ -341,7 +358,7 @@ void devil_sort(struct list_elem * start)
 		{
 			if( !compare(pD->cor,qD->cor) )
 			{
-				swap(p,q);
+				close_swap(p,q);
 				q = list_next(p);
 			}else
 			{
@@ -710,7 +727,6 @@ void print_fin_pos (struct setup *s) {
 	devil_sort(list_begin(&devil_list));
 	pos_print(s,file);
 	fclose(file);
-
 }
 
 void free_resources (struct setup *s) {
