@@ -245,7 +245,7 @@ void cell_check(struct setup * s, int x, int y, int z)
 			}
 		}
 		//카운트 된 것 확인 후 만약 조건 부합시 LIVE_TO_DEAD로
-		if((count > s->dead_max)&&(count < s->dead_min))
+		if((count > s->dead_max)||(count < s->dead_min))
 		{
 			map[x][y][z].status += changed;
 		}
