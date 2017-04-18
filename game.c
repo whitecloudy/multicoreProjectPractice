@@ -41,8 +41,7 @@ struct MAP *** map;
 struct unit angel;
 struct list devil_list;
 int devil_size=0;
-int sort = 0;
-int sort1 = 0;
+int start = 0;
 
 /***************************************
  * 3차원 메모리를 동적할당
@@ -342,40 +341,6 @@ void close_swap(struct list_elem *a, struct list_elem * b)
 	b_next->prev = a;
 }
 
-/***************************************************
- * 데빌 리스트를 정렬하는 함수
- **************************************************/
-void devil_sort(struct list_elem * start)
-{
-	struct list_elem * p = start;
-	struct list_elem * q = list_next(p);
-	struct devil * pD = list_entry(p,struct devil,el);
-	struct devil * qD = list_entry(q,struct devil, el);
-
-	int i,j;
-
-	for(i=1;i<devil_size;i++)
-	{
-		for(j=0;j<devil_size-i;j++)
-		{
-			if( !compare(pD->cor,qD->cor) )
-			{
-				close_swap(p,q);
-				q = list_next(p);
-			}else
-			{
-				p = q;
-				q = list_next(p);
-			}
-			pD = list_entry(p,struct devil,el);
-			qD = list_entry(q,struct devil,el);
-		}
-		p = list_begin(&devil_list);
-		q = list_next(p);
-		pD = list_entry(p,struct devil,el);
-		qD = list_entry(q,struct devil,el);
-	}
-}
 
 /*********************************************
  * 맵을 입력받은 파일에 저장하는 함수
@@ -409,14 +374,30 @@ void pos_print(struct setup * s, FILE * save)
 {
 	struct devil * d=list_entry(list_begin(&devil_list),struct devil,el);
 	int i;
+	int x,y,z;
 
 	fprintf(save,"[Angel]\n");
 	fprintf(save, "(%d, %d, %d)\n\n",angel.x, angel.y, angel.z);
 	fprintf(save,"[Devil]\n");
-	for(i=0;i<devil_size;i++)
+	for(x=0;x<s->map_size;x++)
 	{
-		fprintf(save, "(%d, %d, %d)\n",d->cor.x,d->cor.y,d->cor.z);
-		d = list_entry(list_next(&(d->el)),struct devil, el);
+		for(y=0;y<s->map_size;y++)
+		{
+			for(z=0;z<s->map_size;z++)
+			{
+				for(i=0;i<devil_size;i++)
+				{
+					if(((d->cor.x)==x)&&((d->cor.y)==y)&&((d->cor.z)==z))
+					{
+						fprintf(save, "(%d, %d, %d)\n",d->cor.x,d->cor.y,d->cor.z);
+						if(start!=0)
+							d = devil_remove(d);
+					}else
+						d = list_entry(list_next(&d->el),struct devil,el);
+				}
+				d = list_entry(list_begin(&devil_list),struct devil,el);
+			}
+		}
 	}
 }
 
@@ -584,7 +565,7 @@ void angel_stage (struct setup *s) {
 	//스코프 및 이동거리 초기화
 	int scope = devil_size/(5*s->map_size*s->map_size);
 	int moveLength = s->map_size/10;
-	
+	int x,y,z;
 	int i,j,k,p,q,r,num, biggest=0;
 	int xP=0,xM=0,yP=0,yM=0,zP=0,zM=0;
 
@@ -680,23 +661,33 @@ void angel_stage (struct setup *s) {
 	else if( r>=s->map_size )
 		r = s->map_size-1;
 
+
 	//scope 지역 수색
-	for(  ; i<=p ; i++ )
+	for(x=i ; x<=p ; x++ )
 	{
-		for(  ; j<=q ;j++  )
+		for(y=j ; y<=q ;y++)
 		{
-			for(  ; k<=r ; k++ )
+			for(z=k ; z<=r ; z++ )
 			{
 				//플래그 지역 디플레그
-				if( (map[i][j][k].status==PLAGUE_D)||(map[i][j][k].status==PLAGUE_L) )
+				if( (map[x][y][z].status==PLAGUE_D)||(map[x][y][z].status==PLAGUE_L) )
 				{
-					map[i][j][k].status+=deplagued;
+					map[x][y][z].status+=deplagued;
 				}
 				//해당 지역 데빌 삭제
-				if(map[i][j][k].d!=NULL)
+				map[x][y][z].d = NULL;
+
+				num = devil_size;
+				cursor = list_entry(list_begin(&devil_list),struct devil,el);
+				for(xP=0 ;xP<num ;xP++)
 				{
-					devil_remove(map[i][j][k].d);
-					map[i][j][k].d = NULL;
+					if(((cursor->cor.x)==x)&&((cursor->cor.y)==y)&&((cursor->cor.z)==z))
+					{
+						
+						cursor = devil_remove(cursor);
+					}
+					else
+						cursor=	list_entry(list_next(&(cursor->el)),struct devil,el);
 				}
 			}
 			
@@ -716,7 +707,7 @@ void print_init_pos (struct setup *s) {
 	FILE * file = fopen("Inital_pos.txt","w");
 	pos_print(s,file);
 	fclose(file);
-
+	start =1;
 }
 
 void print_fin_map (struct setup *s) {
@@ -728,7 +719,7 @@ void print_fin_map (struct setup *s) {
 
 void print_fin_pos (struct setup *s) {
 	FILE * file = fopen("Final_pos.txt","w");
-	devil_sort(list_begin(&devil_list));
+	fprintf(stderr,"%d\n",devil_size);
 	pos_print(s,file);
 	fclose(file);
 }

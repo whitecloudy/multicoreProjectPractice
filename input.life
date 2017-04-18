@@ -1,5 +1,5 @@
 total_steps	10
-map_size	100
+map_size	200
 dead_min	5 
 dead_max	20 
 live_min	10
