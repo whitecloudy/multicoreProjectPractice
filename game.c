@@ -82,12 +82,13 @@ void free_3d(void *** data)
 }
 
 /**********************************************
- * Devil의 초기화
+ * Devil의 생성 및 초기화
  * s : 해당 setup
  * d : 초기화 하고자 하는 devil
  * *********************************************/
-void devil_init(struct setup *s, struct devil* d)
+struct devil * devil_init(struct setup *s)
 {
+	struct devil * d = (struct devil *)malloc(sizeof(struct devil));
 	//devil의 초기 위치 설정
     d->cor.x = uniform(0,s->map_size-1,s->SEED_DVL_GEN_X);
     d->cor.y = uniform(0,s->map_size-1,s->SEED_DVL_GEN_Y);
@@ -98,6 +99,8 @@ void devil_init(struct setup *s, struct devil* d)
 	list_push_back(&devil_list,&(d->el));
 
 	devil_size++;
+
+	return d;
 }
 
 /*************************************************
@@ -453,8 +456,7 @@ void init_resources (struct setup *s) {
     list_init(&devil_list);
 
 	//새로운 devil생성
-	tem = (struct devil*)malloc(sizeof(struct devil));
-	devil_init(s,tem);
+	tem = devil_init(s); 
 
 	//해당 devil지역 plague화
 	map[tem->cor.x][tem->cor.y][tem->cor.z].status+=plagued;
@@ -462,15 +464,15 @@ void init_resources (struct setup *s) {
 }
 
 void devil_stage (struct setup *s) {
-    struct devil * tem,tem1;
+    struct devil * tem;
     int i, num;
 	int x,y,z;
 
     if(devil_size==0)//devil이 하나도 없는 상황
     {
+
         //새로운 devil생성
-        tem = (struct devil*)malloc(sizeof(struct devil));
-        devil_init(s,tem);
+        tem = devil_init(s); 
 
         //해당 devil지역 plague화
 		if(map[tem->cor.x][tem->cor.y][tem->cor.z].status<2)	//만약 해당 지역이 plague가 아니라면
@@ -513,8 +515,7 @@ void devil_stage (struct setup *s) {
 	//현 데빌의 수만큼 데빌을 생성(데빌의 숫자는 2배가 됨)
 	for(i=0;i<num;i++)
 	{
-		tem = (struct devil*)malloc(sizeof(struct devil));
-		devil_init(s,tem);
+		tem = devil_init(s); 
 	}
 }
 
@@ -693,7 +694,11 @@ void angel_stage (struct setup *s) {
 					map[i][j][k].status+=deplagued;
 				}
 				//해당 지역 데빌 삭제
-				map[i][j][k].d = NULL;
+				if(map[i][j][k].d!=NULL)
+				{
+					devil_remove(map[i][j][k].d);
+					map[i][j][k].d = NULL;
+				}
 			}
 			
 		}
