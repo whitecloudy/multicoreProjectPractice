@@ -84,7 +84,6 @@ void free_3d(void *** data)
 /**********************************************
  * Devil의 생성 및 초기화
  * s : 해당 setup
- * d : 초기화 하고자 하는 devil
  * *********************************************/
 struct devil * devil_init(struct setup *s)
 {
@@ -218,7 +217,7 @@ void cell_check(struct setup * s, int x, int y, int z)
 				{
 					//자기자신은 세지 않는다
 					if((i==0)&&(j==0)&&(k==0))
-						break;
+						continue;
 					//라이브 셀 카운트
 					if((map[x+i][y+j][z+k].status % changed) == LIVE)
 						count++;
@@ -240,9 +239,9 @@ void cell_check(struct setup * s, int x, int y, int z)
 				for(k=zs;k<=r;k++)
 				{	//자기자신은 세지 않는다
 					if((i==0)&&(j==0)&&(k==0))
-						break;
+						continue;
 					//데드 셀 카운트
-					if((map[x+i][y+j][z+k].status % changed) == DEAD)
+					if((map[x+i][y+j][z+k].status % changed) == LIVE)
 						count++;
 				}
 			}
@@ -642,18 +641,18 @@ void angel_stage (struct setup *s) {
 	if(xP==biggest)
 	{
 		unit_mov(s,moveLength,0,0,&angel);	
-	}else if(xM==biggest)
-	{
-		unit_mov(s,-moveLength,0,0,&angel);
 	}else if(yP==biggest)
 	{
 		unit_mov(s,0,moveLength,0,&angel);
-	}else if(yM==biggest)
-	{
-		unit_mov(s,0,-moveLength,0,&angel);
 	}else if(zP==biggest)
 	{
 		unit_mov(s,0,0,moveLength,&angel);
+	}else if(xM==biggest)
+	{
+		unit_mov(s,-moveLength,0,0,&angel);
+	}else if(yM==biggest)
+	{
+		unit_mov(s,0,-moveLength,0,&angel);
 	}else if(zM==biggest)
 	{
 		unit_mov(s,0,0,-moveLength,&angel);
