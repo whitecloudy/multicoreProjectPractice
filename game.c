@@ -31,7 +31,6 @@ struct devil
 struct MAP{
 	int status;
 	struct devil * d;
-	struct devil * moveIn;
 };
 
 struct MAP *** map;
@@ -119,34 +118,34 @@ struct devil * devil_remove(struct devil *d)
  * ***********************************************/
 void unit_mov(struct setup * s, int x, int y, int z, struct unit * cor)
 {
-    cor->x += x;
-    cor->y += y;
-    cor->z += z;
+	cor->x += x;
+	cor->y += y;
+	cor->z += z;
 
 	//각 좌표별로 테두리를 검사
-    if(cor->x >= s->map_size)
-    {
-        cor->x = s->map_size - 1;
-    }else if(cor->x < 0)
-    {
-        cor->x = 0;
-    }
+	if(cor->x >= s->map_size)
+	{
+		cor->x = s->map_size - 1;
+	}else if(cor->x < 0)
+	{
+		cor->x = 0;
+	}
 
-    if(cor->y >= s->map_size)
-    {
-        cor->y = s->map_size - 1;
-    }else if(cor->y < 0)
-    {
-        cor->y = 0;
-    }
+	if(cor->y >= s->map_size)
+	{
+		cor->y = s->map_size - 1;
+	}else if(cor->y < 0)
+	{
+		cor->y = 0;
+	}
 
-    if(cor->z >= s->map_size)
-    {
-        cor->z = s->map_size - 1;
-    }else if(cor->z < 0)
-    {
-        cor->z = 0;
-    }
+	if(cor->z >= s->map_size)
+	{
+		cor->z = s->map_size - 1;
+	}else if(cor->z < 0)
+	{
+		cor->z = 0;
+	}
 }
 
 /**************************************************************
@@ -161,8 +160,6 @@ void devil_mov(struct setup * s, int x ,int y, int z, struct devil * d)
 	map[d->cor.x][d->cor.y][d->cor.z].d = NULL;
 	//이동
 	unit_mov(s,x,y,z,&(d->cor));
-	//들어온 devil 넣기
-	map[d->cor.x][d->cor.y][d->cor.z].moveIn = d;
 }
 
 /***************************************************************
@@ -482,7 +479,6 @@ void init_resources (struct setup *s) {
              {
                  map[i][j][k].status = uniform(DEAD,LIVE,s->SEED_MAP);
 				 map[i][j][k].d = NULL;
-				 map[i][j][k].moveIn = NULL;
              }
         }
 
@@ -551,20 +547,20 @@ void devil_stage (struct setup *s) {
 		}
 		
 		//이동한 데빌들 이동을 확정
-		for(x=0;x<s->map_size;x++)
+		num = devil_size;
+		tem = list_entry(list_begin(&devil_list),struct devil,el);
+		for(i =0;i<num;i++)
 		{
-			for(y=0;y<s->map_size;y++)
+			if(map[tem->cor.x][tem->cor.y][tem->cor.z].d==NULL)
 			{
-				for( z=0 ; z<s->map_size ; z++ )
-				{
-					if( map[x][y][z].moveIn != NULL )
-					{
-						map[x][y][z].d = map[x][y][z].moveIn;
-						map[x][y][z].moveIn = NULL;
-					}
-				}
+				map[tem->cor.x][tem->cor.y][tem->cor.z].d = tem;
+				tem = list_entry(list_next(&(tem->el)),struct devil,el);
+			}else
+			{
+				tem = devil_remove(tem);//중복된 데빌은 제거
 			}
 		}
+
     }
 
 	num = devil_size;
