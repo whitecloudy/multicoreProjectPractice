@@ -15,10 +15,6 @@
 #define plagued 2
 #define deplagued -2
 
-#define PLUS 0
-#define STOP 1
-#define MINUS 2
-
 struct unit
 {
     int x;
@@ -35,6 +31,7 @@ struct devil
 struct MAP{
 	int status;
 	struct devil * d;
+	struct devil * moveIn;
 };
 
 struct MAP *** map;
@@ -165,7 +162,7 @@ void devil_mov(struct setup * s, int x ,int y, int z, struct devil * d)
 	//이동
 	unit_mov(s,x,y,z,&(d->cor));
 	//들어온 devil 넣기
-	map[d->cor.x][d->cor.y][d->cor.z].d = d;
+	map[d->cor.x][d->cor.y][d->cor.z].moveIn = d;
 }
 
 /***************************************************************
@@ -485,6 +482,7 @@ void init_resources (struct setup *s) {
              {
                  map[i][j][k].status = uniform(DEAD,LIVE,s->SEED_MAP);
 				 map[i][j][k].d = NULL;
+				 map[i][j][k].moveIn = NULL;
              }
         }
 
@@ -530,27 +528,40 @@ void devil_stage (struct setup *s) {
 		y=-(uniform(0,2,s->SEED_DVL_MOV_Y)-1);
 		z=-(uniform(0,2,s->SEED_DVL_MOV_Z)-1);
 		
-		num = devil_size;
 
-        for(i=0;i<num;i++)
+        for(i=0;i<devil_size;i++)
         {
-			//지목된 devil이 가지고 있는 해당 위치의 devil포인터가 다르면 해당 데빌이 삭제됬다고 판단
-			if(map[tem->cor.x][tem->cor.y][tem->cor.z].d != tem)
+			//지목된 devil이 가지고 있는 해당 위치의 devil포인터가 다르면 해당 데빌이 중복된것으로 판단
+			while(map[tem->cor.x][tem->cor.y][tem->cor.z].d != tem)
 			{
 				tem = devil_remove(tem);	//데빌 삭제
-			}else
-			{
-				//devil을 이동
-				devil_mov(s,x,y,z,tem);
-
-				//해당 지역 plague화
-				if(map[tem->cor.x][tem->cor.y][tem->cor.z].status<2)	//만약 해당 지역이 plague가 아니라면
-					map[tem->cor.x][tem->cor.y][tem->cor.z].status+=plagued;
-
-				//다음 devil을 가져옴
-				tem = list_entry(list_next(&(tem->el)),struct devil,el);
 			}
+			//devil을 이동
+			devil_mov(s,x,y,z,tem);
+
+			//해당 지역 plague화
+			if(map[tem->cor.x][tem->cor.y][tem->cor.z].status<2)	//만약 해당 지역이 plague가 아니라면
+				map[tem->cor.x][tem->cor.y][tem->cor.z].status+=plagued;
+
+			//다음 devil을 가져옴
+			tem = list_entry(list_next(&(tem->el)),struct devil,el);
         }
+		
+		for(x=0;x<s->map_size;x++)
+		{
+			for(y=0;y<s->map_size;y++)
+			{
+				for( z=0 ; z<s->map_size ; z++ )
+				{
+					if( map[x][y][z].moveIn != NULL )
+					{
+						map[x][y][z].d = map[x][y][z].moveIn;
+						map[x][y][z].moveIn = NULL;
+					}
+				}
+			}
+		}
+				
     }
 
 	num = devil_size;
@@ -626,7 +637,7 @@ void plague_stage (struct setup *s) {
 
 void angel_stage (struct setup *s) {
 	//스코프 및 이동거리 초기화
-	int scope = devil_size/(5*s->map_size*s->map_size);
+	int scope = devil_size/(5*(s->map_size)*(s->map_size));
 	int moveLength = s->map_size/10;
 	int x,y,z;
 	int i,j,k,p,q,r,num, biggest=0;
@@ -639,7 +650,7 @@ void angel_stage (struct setup *s) {
 	struct devil * cursor= list_entry(list_begin(&devil_list),struct devil,el);
 
 	//각 데빌의 위치를 검색
-	for( i=0, num=devil_size ; i<num ; i++ )
+	for( i=0 ; i<devil_size ; i++ )
 	{
 		if(cursor->cor.x > angel.x)
 		{
@@ -739,35 +750,34 @@ void angel_stage (struct setup *s) {
 				}
 				//해당 지역 데빌 삭제
 				map[x][y][z].d = NULL;
-
-				num = devil_size;
-				cursor = list_entry(list_begin(&devil_list),struct devil,el);
-				for(xP=0 ;xP<num ;xP++)
-				{
-					if(((cursor->cor.x)==x)&&((cursor->cor.y)==y)&&((cursor->cor.z)==z))
-					{
-						
-						cursor = devil_remove(cursor);
-					}
-					else
-						cursor=	list_entry(list_next(&(cursor->el)),struct devil,el);
-				}
 			}
-			
 		}
-		
+	}
+
+	
+	//scope범위에 해당하는 데빌을 데빌 리스트에서 삭제
+	num = devil_size;
+	cursor = list_entry(list_begin(&devil_list),struct devil,el);
+	for(xP=0;xP<devil_size;xP++)
+	{
+		while((cursor->cor.x>=i)&&(cursor->cor.x<=p)&&(cursor->cor.y>=j)&&(cursor->cor.y<=q)&&(cursor->cor.z>=k)&&(cursor->cor.z<=r))
+		{
+			cursor = devil_remove(cursor);
+		}
+
+		cursor = list_entry(list_next(&(cursor->el)),struct devil,el);
 	}
 }
 
 
 void print_init_map (struct setup *s) {
-	FILE * file = fopen("Inital_map.txt","w");
+	FILE * file = fopen("Initial_map.txt","w");
 	map_print(s,file);
 	fclose(file);
 }
 
 void print_init_pos (struct setup *s) {
-	FILE * file = fopen("Inital_pos.txt","w");
+	FILE * file = fopen("Initial_pos.txt","w");
 	init_pos_print(s,file);
 	fclose(file);
 }
