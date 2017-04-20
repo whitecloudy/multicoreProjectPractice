@@ -1,4 +1,4 @@
-life: life.c lcgrand.o list.o game.o
+life:  life.c lcgrand.o list.o game.o
 	gcc -g -o life life.c lcgrand.o list.o game.o
 lcgrand.o: lcgrand.c lcgrand.h
 	gcc -g -c lcgrand.c lcgrand.h
