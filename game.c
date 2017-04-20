@@ -791,7 +791,6 @@ void print_fin_map (struct setup *s) {
 
 void print_fin_pos (struct setup *s) {
 	FILE * file = fopen("Final_pos.txt","w");
-	fprintf(stderr,"%d\n",devil_size);
 	pos_print(s,file);
 	fclose(file);
 }
