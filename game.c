@@ -367,35 +367,98 @@ void map_print(struct setup * s, FILE * save)
 	}
 }
 
+/*****************************************************
+ * 처음에 엔젤과 데빌의 위치를 파일에 저장하는 함수
+ ****************************************************/
+void init_pos_print(struct setup * s, FILE * save)
+{
+	struct devil * d = list_entry(list_begin(&devil_list),struct devil,el);
+
+	fprintf(save,"[Angel]\n");
+	fprintf(save, "(%d, %d, %d)\n\n",angel.x, angel.y, angel.z);
+	fprintf(save,"[Devil]\n");
+	fprintf(save,"(%d, %d, %d)\n",d->cor.x,d->cor.y,d->cor.z);
+}
+
 /************************************************
  * 엔젤과 데빌의 위치를 파일에 저장하는 함수
  * *********************************************/
 void pos_print(struct setup * s, FILE * save)
 {
-	struct devil * d=list_entry(list_begin(&devil_list),struct devil,el);
+	struct devil * d;
+	struct devil * tem,next;
+	struct list x_same, y_same;
 	int i;
 	int x,y,z;
+	int x_size=0, y_size=0;
+	int num;
+
+	list_init(&x_same);
+	list_init(&y_same);
 
 	fprintf(save,"[Angel]\n");
 	fprintf(save, "(%d, %d, %d)\n\n",angel.x, angel.y, angel.z);
 	fprintf(save,"[Devil]\n");
+
+	//devil 프린트
 	for(x=0;x<s->map_size;x++)
 	{
+		d=list_entry(list_begin(&devil_list),struct devil,el);
+		num = devil_size;
+		for(i=0;i<num;i++)
+		{
+			if((d->cor.x)==x)
+			{
+				//맞는 x값을 찾았으므로 이를 devil_list에서 빼낸다.
+				tem = d;
+				list_remove(&(d->el));
+				d = list_entry(list_next(&(d->el)),struct devil,el);
+				devil_size--;
+
+				//해당 devil을 넘겨준다
+				list_push_back(&x_same,&(tem->el));
+				x_size++;
+			
+			}else
+				d = list_entry(list_next(&(d->el)),struct devil,el);
+		}
 		for(y=0;y<s->map_size;y++)
 		{
+			num = x_size;
+			d = list_entry(list_begin(&x_same),struct devil, el);
+			for(i=0;i<num;i++)
+			{
+				if((d->cor.y)==y)
+				{
+					tem = d;
+					list_remove(&(d->el));
+					d = list_entry(list_next(&(d->el)),struct devil,el);
+					x_size--;
+
+					list_push_back(&y_same,&(tem->el));
+					y_size++;
+				}else
+					d = list_entry(list_next(&(d->el)),struct devil,el);
+			}
 			for(z=0;z<s->map_size;z++)
 			{
-				for(i=0;i<devil_size;i++)
+				num = y_size;
+				d = list_entry(list_begin(&y_same),struct devil,el);
+				for(i=0;i<num;i++)
 				{
-					if(((d->cor.x)==x)&&((d->cor.y)==y)&&((d->cor.z)==z))
+					if((d->cor.z) == z)
 					{
-						fprintf(save, "(%d, %d, %d)\n",d->cor.x,d->cor.y,d->cor.z);
-						if(start!=0)
-							d = devil_remove(d);
+						tem = list_entry(list_next(&(d->el)),struct devil,el);
+						fprintf(save,"(%d, %d, %d)\n",x,y,z);
+						list_remove(&(d->el));
+						free(d);
+						y_size--;
+						d = tem;
 					}else
-						d = list_entry(list_next(&d->el),struct devil,el);
+					{
+						d = list_entry(list_next(&(d->el)),struct devil,el);
+					}
 				}
-				d = list_entry(list_begin(&devil_list),struct devil,el);
 			}
 		}
 	}
@@ -705,9 +768,8 @@ void print_init_map (struct setup *s) {
 
 void print_init_pos (struct setup *s) {
 	FILE * file = fopen("Inital_pos.txt","w");
-	pos_print(s,file);
+	init_pos_print(s,file);
 	fclose(file);
-	start =1;
 }
 
 void print_fin_map (struct setup *s) {
@@ -728,9 +790,4 @@ void free_resources (struct setup *s) {
 	struct devil * d = list_entry(list_begin(&devil_list),struct devil,el);
 	int i = 0;
 	free_3d(map);
-
-	for(;i<devil_size;i++)
-	{
-		d = devil_remove(d);
-	}
 }
