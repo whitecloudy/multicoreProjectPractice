@@ -528,25 +528,29 @@ void devil_stage (struct setup *s) {
 		y=-(uniform(0,2,s->SEED_DVL_MOV_Y)-1);
 		z=-(uniform(0,2,s->SEED_DVL_MOV_Z)-1);
 		
+		num = devil_size;
 
-        for(i=0;i<devil_size;i++)
+        for(i=0;i<num;i++)
         {
 			//지목된 devil이 가지고 있는 해당 위치의 devil포인터가 다르면 해당 데빌이 중복된것으로 판단
-			while(map[tem->cor.x][tem->cor.y][tem->cor.z].d != tem)
+			if(map[tem->cor.x][tem->cor.y][tem->cor.z].d != tem)
 			{
 				tem = devil_remove(tem);	//데빌 삭제
+			}else
+			{
+				//devil을 이동
+				devil_mov(s,x,y,z,tem);
+
+				//해당 지역 plague화
+				if(map[tem->cor.x][tem->cor.y][tem->cor.z].status<2)	//만약 해당 지역이 plague가 아니라면
+					map[tem->cor.x][tem->cor.y][tem->cor.z].status+=plagued;
+
+				//다음 devil을 가져옴
+				tem = list_entry(list_next(&(tem->el)),struct devil,el);
 			}
-			//devil을 이동
-			devil_mov(s,x,y,z,tem);
-
-			//해당 지역 plague화
-			if(map[tem->cor.x][tem->cor.y][tem->cor.z].status<2)	//만약 해당 지역이 plague가 아니라면
-				map[tem->cor.x][tem->cor.y][tem->cor.z].status+=plagued;
-
-			//다음 devil을 가져옴
-			tem = list_entry(list_next(&(tem->el)),struct devil,el);
-        }
+		}
 		
+		//이동한 데빌들 이동을 확정
 		for(x=0;x<s->map_size;x++)
 		{
 			for(y=0;y<s->map_size;y++)
@@ -561,7 +565,6 @@ void devil_stage (struct setup *s) {
 				}
 			}
 		}
-				
     }
 
 	num = devil_size;
@@ -758,14 +761,15 @@ void angel_stage (struct setup *s) {
 	//scope범위에 해당하는 데빌을 데빌 리스트에서 삭제
 	num = devil_size;
 	cursor = list_entry(list_begin(&devil_list),struct devil,el);
-	for(xP=0;xP<devil_size;xP++)
+	for(xP=0;xP<num;xP++)
 	{
-		while((cursor->cor.x>=i)&&(cursor->cor.x<=p)&&(cursor->cor.y>=j)&&(cursor->cor.y<=q)&&(cursor->cor.z>=k)&&(cursor->cor.z<=r))
+		if((cursor->cor.x>=i)&&(cursor->cor.x<=p)&&(cursor->cor.y>=j)&&(cursor->cor.y<=q)&&(cursor->cor.z>=k)&&(cursor->cor.z<=r))
 		{
 			cursor = devil_remove(cursor);
+		}else
+		{
+			cursor = list_entry(list_next(&(cursor->el)),struct devil,el);
 		}
-
-		cursor = list_entry(list_next(&(cursor->el)),struct devil,el);
 	}
 }
 
