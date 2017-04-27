@@ -4,16 +4,15 @@
 #include "./list.h"
 #include "./lcgrand.h"
 
-#define DEAD 0
-#define LIVE 1
-#define PLAGUE_D 2
-#define PLAGUE_L 3
-#define DEAD_TO_LIVE 4
-#define LIVE_TO_DEAD 5
-
-#define changed 4
-#define plagued 2
-#define deplagued -2
+#define DEAD 0x00
+#define LIVE 0x80
+#define PLAGUE 0x40
+#define CHANGE 0x20
+#define NumOfDevil(x) x%0x20
+#define IsPlague(x) (x&PLAGUE)==PLAGUE
+#define IsChange(x) (x&CHANGE)==CHANGE
+#define IsLive(x) ((x&LIVE)==LIVE)&&(!IsPlague(x))
+#define IsDead(x) ((x&LIVE)==DEAD)&&(!IsPlague(x))
 
 struct unit
 {
@@ -29,8 +28,7 @@ struct devil
 };
 
 struct MAP{
-	int status;
-	struct devil * d;
+    unsigned char d;
 };
 
 struct MAP *** map;
@@ -80,18 +78,17 @@ void free_3d(void *** data)
  * Devil의 생성 및 초기화
  * s : 해당 setup
  * *********************************************/
-struct devil * devil_init(struct setup *s)
+struct unit devil_init(struct setup *s)
 {
-	struct devil * d = (struct devil *)malloc(sizeof(struct devil));
+    struct unit d;
 	//devil의 초기 위치 설정
-    d->cor.x = uniform(0,s->map_size-1,s->SEED_DVL_GEN_X);
-    d->cor.y = uniform(0,s->map_size-1,s->SEED_DVL_GEN_Y);
-    d->cor.z = uniform(0,s->map_size-1,s->SEED_DVL_GEN_Z);
+    d.x = uniform(0,s->map_size-1,s->SEED_DVL_GEN_X);
+    d.y = uniform(0,s->map_size-1,s->SEED_DVL_GEN_Y);
+    d.z = uniform(0,s->map_size-1,s->SEED_DVL_GEN_Z);
 	//devil 맵 입력
-	map[d->cor.x][d->cor.y][d->cor.z].d = d;
-	//devil 리스트 입력
-	list_push_back(&devil_list,&(d->el));
+	map[d.x][d.y][d.z].d += 1;
 
+    //devil 사이즈 증가
 	devil_size++;
 
 	return d;
@@ -99,15 +96,11 @@ struct devil * devil_init(struct setup *s)
 
 /*************************************************
  * Devil을 제거하는 함수
- * 제거후 다음 devil값을 반환
  * ***********************************************/
-struct devil * devil_remove(struct devil *d)
+void devil_remove(struct MAP * m)
 {
-	struct devil * next = list_entry(list_next(&(d->el)),struct devil,el);
-	list_remove(&(d->el));
-	free(d);
+    m->d--;
 	devil_size--;
-	return next;
 }
 
 /*************************************************
@@ -152,20 +145,22 @@ void unit_mov(struct setup * s, int x, int y, int z, struct unit * cor)
  * devil의 이동을 관장함
  * s : 해당 setup
  * x, y, z : 이동해야하는 양
- * d : 이동할 devil
+ * cor : 이동할 devil 위치
  * ************************************************************/
-void devil_mov(struct setup * s, int x ,int y, int z, struct devil * d)
+void devil_mov(struct setup * s, int x ,int y, int z, struct unit * cor)
 {
 	//나가는 devil 빼기
-	map[d->cor.x][d->cor.y][d->cor.z].d = NULL;
+	map[cor->x][cor->y][cor->z].d--;
 	//이동
-	unit_mov(s,x,y,z,&(d->cor));
+	unit_mov(s,x,y,z,cor);
+    //들어가는 곳 devil 넣기
+    map[cor->x][cor->y][cor->z].d -= (NumOfDevil(map[cor->x][cor->y][cor->z].d)+1);
 }
 
 /***************************************************************
  * 입력받은 좌표의 셀 주위를 확인한 후 live or dead를 결정
  * ********************************************************/
-void cell_check(struct setup * s, int x, int y, int z)
+void cell_check(struct setup * s, int x, int y, int z, int * leftCount, int * middleCount)
 {
 	int i,j,k;
 	int xs,ys,zs;
@@ -197,56 +192,70 @@ void cell_check(struct setup * s, int x, int y, int z)
 		r=0;
 	else
 		r=1;
+    
+    //첫번째 자리인 경우
+    if((*leftCount==-1)&&(*middleCount==-1))
+    {
+        *leftCount = 0;
+        *middleCount = 0;
+        //이웃 셀 중 LIVE인 것들을 체크
+        for(k=zs;k<=r;k++)
+        {
+            for(j=ys;j<=q;j++)
+            {
+                for(i=xs;i<=p;i++)
+                {
+                    //라이브 셀 카운트
+                    if(IsLive(map[x+i][y+j][z+k].d))
+                    {
+                        if(k==0)
+                            *leftCount++;
+                        else if(k==1)
+                            *middleCount++;
+                        if(i|j|k != 0)//자기자신은 뺀다
+                            count++;
+                    }
+                }
+            }
+        }
+        if(IsDead(map[x][y][z].d))	//DEAD일 경우
+        {
+            //카운트 된 것 확인 후 만약 조건 부합시 DEAD_TO_LIVE로
+            if((count > s->live_min)&&(count < s->live_max))
+            {
+                map[x][y][z].d |= CHANGE;
+            }
+        }else if(IsLive(map[x][y][z].d))	//LIVE일 경우
+        {			
+            //카운트 된 것 확인 후 만약 조건 부합시 LIVE_TO_DEAD로
+            if((count > s->dead_max)||(count < s->dead_min))
+            {
+                map[x][y][z].d |= CHANGE;
+            }
+        }
+    }else
+    {
+        count = *leftCount+*middleCount;
 
-	//DEAD, LIVE 카운트
-	if(map[x][y][z].status == DEAD)	//DEAD일 경우
-	{
-		//이웃 셀 중 LIVE인 것들을 체크
-		for(i=xs;i<=p;i++)
-		{
-			for(j=ys;j<=q;j++)
-			{
-				for(k=zs;k<=r;k++)
-				{
-					//자기자신은 세지 않는다
-					if((i==0)&&(j==0)&&(k==0))
-						continue;
-					//라이브 셀 카운트
-					if((map[x+i][y+j][z+k].status % changed) == LIVE)
-						count++;
-				}
-			}
-		}
-		//카운트 된 것 확인 후 만약 조건 부합시 DEAD_TO_LIVE로
-		if((count > s->live_min)&&(count < s->live_max))
-		{
-			map[x][y][z].status += changed;
-		}
-	}else if(map[x][y][z].status == LIVE)	//LIVE일 경우
-	{			
-		//이웃 셀 중 DEAD인 것들을 체크
-		for(i=xs;i<=p;i++)
-		{
-			for(j=ys;j<=q;j++)
-			{
-				for(k=zs;k<=r;k++)
-				{	//자기자신은 세지 않는다
-					if((i==0)&&(j==0)&&(k==0))
-						continue;
-					//데드 셀 카운트
-					if((map[x+i][y+j][z+k].status % changed) == LIVE)
-						count++;
-				}
-			}
-		}
-		//카운트 된 것 확인 후 만약 조건 부합시 LIVE_TO_DEAD로
-		if((count > s->dead_max)||(count < s->dead_min))
-		{
-			map[x][y][z].status += changed;
-		}
-	}
+        for(j=ys;j<=q;j++)
+        {
+            for(i=xs;i<=p;i++)
+            {
+                //라이브 셀 카운트
+                if(IsLive(map[x+i][y+j][z+k].d))
+                {
+                    if(k==0)
+                        *leftCount++;
+                    else if(k==1)
+                        *middleCount++;
+
+                    count++;
+                }
+            }
+        }
+
+
 }
-
 /***************************************************************
  * 입력받은 좌표의 셀 주위를 전염시킴
  * ********************************************************/
@@ -290,8 +299,8 @@ void cell_transmit(struct setup * s, int x, int y, int z)
 		{
 			for(k=zs;k<=r;k++)
 			{
-				if(map[x+i][y+j][z+k].status<2)
-					map[x+i][y+j][z+k].status += changed;
+				if(!IsPlague(map[x+i][y+j][z+k].d))
+					map[x+i][y+j][z+k].d |= CHANGE;
 			}
 		}
 	}
