@@ -218,44 +218,52 @@ void cell_check(struct setup * s, int x, int y, int z, int * leftCount, int * mi
                 }
             }
         }
-        if(IsDead(map[x][y][z].d))	//DEAD일 경우
-        {
-            //카운트 된 것 확인 후 만약 조건 부합시 DEAD_TO_LIVE로
-            if((count > s->live_min)&&(count < s->live_max))
-            {
-                map[x][y][z].d |= CHANGE;
-            }
-        }else if(IsLive(map[x][y][z].d))	//LIVE일 경우
-        {			
-            //카운트 된 것 확인 후 만약 조건 부합시 LIVE_TO_DEAD로
-            if((count > s->dead_max)||(count < s->dead_min))
-            {
-                map[x][y][z].d |= CHANGE;
-            }
-        }
+        
     }else
     {
         count = *leftCount+*middleCount;
+		*leftCount = *middleCount;
+		*middleCount = 0;
 
-        for(j=ys;j<=q;j++)
-        {
-            for(i=xs;i<=p;i++)
-            {
-                //라이브 셀 카운트
-                if(IsLive(map[x+i][y+j][z+k].d))
-                {
-                    if(k==0)
-                        *leftCount++;
-                    else if(k==1)
-                        *middleCount++;
+		if(IsLive(map[x][y][z].d))
+			count--;
 
-                    count++;
-                }
-            }
-        }
+		if(r==1)
+		{
+			for(j=ys;j<=q;j++)
+			{
+				for(i=xs;i<=p;i++)
+				{
+					//라이브 셀 카운트
+					if(IsLive(map[x+i][y+j][z+1].d))
+					{
+						*middleCount++;
+					}
+				}
+			}
+			count += *middleCount;
+		}
+	}
 
-
+	if(IsDead(map[x][y][z].d))	//DEAD일 경우
+	{
+		//카운트 된 것 확인 후 만약 조건 부합시 DEAD_TO_LIVE로
+		if((count > s->live_min)&&(count < s->live_max))
+		{
+			map[x][y][z].d |= CHANGE;
+		}
+	}else if(IsLive(map[x][y][z].d))	//LIVE일 경우
+	{			
+		//카운트 된 것 확인 후 만약 조건 부합시 LIVE_TO_DEAD로
+		if((count > s->dead_max)||(count < s->dead_min))
+		{
+			map[x][y][z].d |= CHANGE;
+		}
+	}
 }
+
+////////////////////////////////////////////////////////////////////////////////
+
 /***************************************************************
  * 입력받은 좌표의 셀 주위를 전염시킴
  * ********************************************************/
