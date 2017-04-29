@@ -197,7 +197,7 @@ void cell_check(struct setup * s, int x, int y, int z, int * leftCount, int * mi
 		r=1;
     
     //첫번째 자리인 경우
-    if((*leftCount==-1)&&(*middleCount==-1))
+    if(((*leftCount)==-1)&&((*middleCount)==-1))
     {
         *leftCount = 0;
         *middleCount = 0;
@@ -212,9 +212,9 @@ void cell_check(struct setup * s, int x, int y, int z, int * leftCount, int * mi
                     if(IsLive(map[x+i][y+j][z+k].d))
                     {
                         if(k==0)
-                            *leftCount++;
+                            (*leftCount)++;
                         else if(k==1)
-                            *middleCount++;
+                            (*middleCount)++;
                         if(i|j|k != 0)//자기자신은 뺀다
                             count++;
                     }
@@ -243,7 +243,7 @@ void cell_check(struct setup * s, int x, int y, int z, int * leftCount, int * mi
 					//라이브 셀 카운트
 					if(IsLive(map[x+i][y+j][z+1].d))
 					{
-						*middleCount++;
+						(*middleCount)++;
 					}
 				}
 			}
@@ -283,93 +283,7 @@ void cell_check(struct setup * s, int x, int y, int z, int * leftCount, int * mi
 }
 
 
-/***************************************************************
- * 입력받은 좌표의 셀 주위를 전염시킴
- * ********************************************************/
-void cell_transmit(struct setup * s, int x, int y, int z)
-{
-	int i,j,k;
-	int xs,ys,zs;
-	int p,q,r;
-	int count = 0;
 
-	//테두리 체크
-	if(x==0)
-		xs=0;
-	else
-		xs=-1;
-	if(x==s->map_size-1)
-		p=0;
-	else
-		p=1;
-	if(y==0)
-		ys=0;
-	else
-		ys=-1;
-	if(y==s->map_size-1)
-		q=0;
-	else
-		q=1;
-	if(z==0)
-		zs=0;
-	else
-		zs=-1;
-	if(z==s->map_size-1)
-		r=0;
-	else
-		r=1;
-
-	//이웃 셀 전염
-	for(i=xs;i<=p;i++)
-	{
-		for(j=ys;j<=q;j++)
-		{
-			for(k=zs;k<=r;k++)
-			{
-				if(!(IsPlague(map[x+i][y+j][z+k].d)))
-					map[x+i][y+j][z+k].d |= CHANGE;
-			}
-		}
-	}
-}
-
-/*****************************************************
- * A와 B를 비교하는 함수
- * return : B가 더 크거나 같으면 1 A가 더 크면 0을 반환
- * ***************************************************/
-int compare(struct unit A, struct unit B)
-{
-	if(A.x > B.x)
-		return 0;
-	else if(A.x < B.x)
-		return 1;
-	else if(A.y > B.y)
-		return 0;
-	else if(A.y < B.y)
-		return 1;
-	else if(A.z > B.z)
-		return 0;
-	else
-		return 1;
-}
-
-/********************************************************
- * 근접한 두개의 list_elem의 위치를 바꾸는 함수
- * ****************************************************/
-void close_swap(struct list_elem *a, struct list_elem * b)
-{
-	struct list_elem *a_prev = a->prev;
-	struct list_elem *a_next = a->next;
-	struct list_elem *b_prev = b->prev;
-	struct list_elem *b_next = b->next;
-
-	a->prev = b;
-	a->next = b_next;
-	b->prev = a_prev;
-	b->next = a;
-	a_prev->next = b;
-	b_next->prev = a;
-}
 
 
 /*********************************************
@@ -403,8 +317,6 @@ void map_print(struct setup * s, FILE * save)
  * *********************************************/
 void pos_print(struct setup * s, FILE * save)
 {
-	struct devil * d;
-	struct devil * tem,next;
 	struct list x_same, y_same;
 	int i;
 	int x,y,z;
@@ -782,7 +694,5 @@ void print_fin_pos (struct setup *s) {
 }
 
 void free_resources (struct setup *s) {
-	struct devil * d = list_entry(list_begin(&devil_list),struct devil,el);
-	int i = 0;
 	free_3d(map);
 }
