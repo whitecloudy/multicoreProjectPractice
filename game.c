@@ -8,23 +8,22 @@
 #define LIVE 0x80
 #define PLAGUE 0x40
 #define CHANGE 0x20
-#define NumOfDevil(x) x%0x20
-#define IsPlague(x) (x&PLAGUE)==PLAGUE
-#define IsChange(x) (x&CHANGE)==CHANGE
-#define IsLive(x) ((x&LIVE)==LIVE)&&(!IsPlague(x))
-#define IsDead(x) ((x&LIVE)==DEAD)&&(!IsPlague(x))
+#define DEVIL_FULL 0x1F
+
+#define NumOfDevil(x) (x&0x1F)
+#define IsPlague(x) ((x&PLAGUE)==PLAGUE)
+#define IsChange(x) ((x&CHANGE)==CHANGE)
+#define IsLive(x) (((x&LIVE)==LIVE)&&(!(IsPlague(x))))
+#define IsDead(x) (((x&LIVE)==DEAD)&&(!(IsPlague(x))))
+#define EraseDevil(x) (x&0xE0)
+#define AngelCure(x) (x&0xC0)
+
 
 struct unit
 {
     int x;
     int y;
     int z;
-};
-
-struct devil
-{
-    struct unit cor;
-    struct list_elem el;
 };
 
 struct MAP{
@@ -80,7 +79,7 @@ void free_3d(void *** data)
  *
  * return : 데빌의 위치
  * *********************************************/
-inline struct unit devil_init(struct setup *s)
+struct unit devil_init(struct setup *s)
 {
     struct unit d;
 	//devil의 초기 위치 설정
@@ -99,7 +98,7 @@ inline struct unit devil_init(struct setup *s)
 /*************************************************
  * Devil을 제거하는 함수
  * ***********************************************/
-inline void devil_remove(struct MAP * m)
+void devil_remove(struct MAP * m)
 {
     m->d--;
 	devil_size--;
@@ -153,12 +152,12 @@ void devil_mov(struct setup * s, int x ,int y, int z, struct unit * cor)
 {
 	//나가는 devil 빼기
 	devil_size -= NumOfDevil(map[cor->x][cor->y][cor->z].d);	//이동할 데빌 및 해당 자리 중복 데빌 제거
-	map[cor->x][cor->y][cor->z].d -= NumOfDevil(map[cor->x][cor->y][cor->z].d);
+	map[cor->x][cor->y][cor->z].d = EraseDevil(map[cor->x][cor->y][cor->z].d);
 	//이동
 	unit_mov(s,x,y,z,cor);
     //들어가는 곳 devil 넣기
 	devil_size -= (NumOfDevil(map[cor->x][cor->y][cor->z].d)-1);	//들어올 자리에 중복될 데빌 제거 및 데빌 이동
-    map[cor->x][cor->y][cor->z].d -= (NumOfDevil(map[cor->x][cor->y][cor->z].d)-1);
+    map[cor->x][cor->y][cor->z].d = EraseDevil(map[cor->x][cor->y][cor->z].d)+1;
 }
 
 /**********************************************************************************
@@ -275,7 +274,7 @@ void cell_check(struct setup * s, int x, int y, int z, int * leftCount, int * mi
 			{
 				for(k=zs;k<=r;k++)
 				{
-					if(!IsPlague(map[x+i][y+j][z+k].d))
+					if(!(IsPlague(map[x+i][y+j][z+k].d)))
 						map[x+i][y+j][z+k].d ^= CHANGE;
 				}
 			}
@@ -327,7 +326,7 @@ void cell_transmit(struct setup * s, int x, int y, int z)
 		{
 			for(k=zs;k<=r;k++)
 			{
-				if(!IsPlague(map[x+i][y+j][z+k].d))
+				if(!(IsPlague(map[x+i][y+j][z+k].d)))
 					map[x+i][y+j][z+k].d |= CHANGE;
 			}
 		}
@@ -398,18 +397,6 @@ void map_print(struct setup * s, FILE * save)
 	}
 }
 
-/*****************************************************
- * 처음에 엔젤과 데빌의 위치를 파일에 저장하는 함수
- ****************************************************/
-void init_pos_print(struct setup * s, FILE * save)
-{
-	struct unit d = devil_init(s);
-
-	fprintf(save,"[Angel]\n");
-	fprintf(save, "(%d, %d, %d)\n\n",angel.x, angel.y, angel.z);
-	fprintf(save,"[Devil]\n");
-	fprintf(save,"(%d, %d, %d)\n",d.x,d.y,d.z);
-}
 
 /************************************************
  * 엔젤과 데빌의 위치를 파일에 저장하는 함수
@@ -435,7 +422,7 @@ void pos_print(struct setup * s, FILE * save)
 		{
 			for( z=0 ; z<s->map_size-1 ; z++ )
 			{
-				for( i=0 ; i<NumOfDevil(map[x][y][z].d) ; i++ )
+				for( i=0 ; i<(NumOfDevil(map[x][y][z].d)) ; i++ )
 				{
 					fprintf(save,"(%d, %d, %d)\n",x,y,z);
 				}
@@ -465,7 +452,7 @@ void init_resources (struct setup *s) {
         { 
              for(k=0;k<s->map_size;k++)
              {
-				 map[i][j][k].d = uniform(0,1,s->SEED_MAP)<<7;
+				 map[i][j][k].d = (unsigned char)uniform(0,1,s->SEED_MAP)<<7;
              }
         }
 
@@ -487,7 +474,7 @@ void init_resources (struct setup *s) {
 void devil_stage (struct setup *s) {
     struct unit tem;
     int i,j,k, num;
-	int ic, jc,ke;
+	int ic, jc,kc;
 	int ie,je,ke;
 	int x,y,z;
 
@@ -613,14 +600,17 @@ void devil_stage (struct setup *s) {
 
 void live_dead_stage (struct setup *s) {
 	int i,j,k;
+	int leftCount, middleCount;
 	//각 셀을 돌아가면서 확인
 	for(i = 0;i<s->map_size;i++)
 	{
 		for(j=0;j<s->map_size;j++)
 		{
+			leftCount = -1;
+			middleCount = -1;
 			for(k=0;k<s->map_size;k++)
 			{
-				cell_check(s,i,j,k);
+				cell_check(s,i,j,k,&leftCount,&middleCount);
 			}
 		}
 	}
@@ -635,6 +625,7 @@ void live_dead_stage (struct setup *s) {
 				if(IsChange(map[i][j][k].d))
 				{
 					map[i][j][k].d ^= LIVE;	//live는 dead로 dead 는 live로
+					map[i][j][k].d ^= CHANGE;	//Change flag 제거
 				}
 			}
 		}
@@ -649,6 +640,7 @@ void angel_stage (struct setup *s) {
 	//스코프 및 이동거리 초기화
 	int scope = devil_size/(5*(s->map_size)*(s->map_size));
 	int moveLength = s->map_size/10;
+
 	int x,y,z;
 	int i,j,k,p,q,r,num, biggest=0;
 	int xP=0,xM=0,yP=0,yM=0,zP=0,zM=0;
@@ -656,51 +648,54 @@ void angel_stage (struct setup *s) {
 	if((moveLength/2)>scope)
 		scope = moveLength/2;
 
-	//최초 데빌을 지목
-	struct devil * cursor= list_entry(list_begin(&devil_list),struct devil,el);
-
 	//각 데빌의 위치를 검색
-	for( i=0 ; i<devil_size ; i++ )
+	for( i=0 ; i<s->map_size ; i++ )
 	{
-		if(cursor->cor.x > angel.x)
+		if(i==angel.x)	//엔젤 선상에 있는 데빌은 세지 않는다
+			continue;
+		for( j=0 ; j<s->map_size ; j++ )
 		{
-			xP++;
-			if(xP>biggest)
-				biggest = xP;
-		}else if(cursor->cor.x < angel.x)
-		{
-			xM++;
-			if(xM>biggest)
-				biggest = xM;
-		}
+			if(j==angel.y)
+				continue;
+			for( k=0 ; k<s->map_size ; k++ )
+			{
+				if(k==angel.z)
+					continue;
+				num = NumOfDevil(map[i][j][k].d);
+				if(num!=0)	//데빌 숫자가 0이 아니라면
+				{
+					if(i>angel.x)
+						xP += num;
+					else
+						xM += num;
 
-		if(cursor->cor.y > angel.y)
-		{
-			yP++;
-			if(yP>biggest)
-				biggest = yP;
+					if(j>angel.y)
+						yP += num;
+					else
+						yM += num;
 
-		}else if( cursor->cor.y < angel.y )
-		{
-			yM++;
-			if(yM>biggest)
-				biggest = yM;
+					if(k>angel.z)
+						zP += num;
+					else
+						zM += num;
+				}
+			}
+			
 		}
-
-		if(cursor->cor.z > angel.z)
-		{
-			zP++;
-			if(zP>biggest)
-				biggest = zP;
-		}else if( cursor->cor.z < angel.z )
-		{
-			zM++;
-			if(zM>biggest)
-				biggest = zM;
-		}
-		//다음 데빌로 이동
-		cursor = list_entry(list_next(&(cursor->el)),struct devil,el);
+		
 	}
+
+	biggest = xP;
+	if(xM > biggest)
+		biggest = xM;
+	if(yP > biggest)
+		biggest = yP;
+	if(yM > biggest)
+		biggest = yM;
+	if(zP > biggest)
+		biggest = zP;
+	if(zM > biggest)
+		biggest = zM;
 
 	//엔젤 좌표 이동
 	if(xP==biggest)
@@ -753,29 +748,9 @@ void angel_stage (struct setup *s) {
 		{
 			for(z=k ; z<=r ; z++ )
 			{
-				//플래그 지역 디플레그
-				if( (map[x][y][z].status==PLAGUE_D)||(map[x][y][z].status==PLAGUE_L) )
-				{
-					map[x][y][z].status+=deplagued;
-				}
-				//해당 지역 데빌 삭제
-				map[x][y][z].d = NULL;
+				//데빌 삭제 및 플레그 제거
+				AngelCure(map[i][j][k].d);
 			}
-		}
-	}
-
-	
-	//scope범위에 해당하는 데빌을 데빌 리스트에서 삭제
-	num = devil_size;
-	cursor = list_entry(list_begin(&devil_list),struct devil,el);
-	for(xP=0;xP<num;xP++)
-	{
-		if((cursor->cor.x>=i)&&(cursor->cor.x<=p)&&(cursor->cor.y>=j)&&(cursor->cor.y<=q)&&(cursor->cor.z>=k)&&(cursor->cor.z<=r))
-		{
-			cursor = devil_remove(cursor);
-		}else
-		{
-			cursor = list_entry(list_next(&(cursor->el)),struct devil,el);
 		}
 	}
 }
@@ -789,7 +764,7 @@ void print_init_map (struct setup *s) {
 
 void print_init_pos (struct setup *s) {
 	FILE * file = fopen("Initial_pos.txt","w");
-	init_pos_print(s,file);
+	pos_print(s,file);
 	fclose(file);
 }
 
