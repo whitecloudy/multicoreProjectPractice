@@ -15,6 +15,7 @@
 #define IsChange(x) ((x&CHANGE)==CHANGE)
 #define IsLive(x) (((x&LIVE)==LIVE)&&(!(IsPlague(x))))
 #define IsDead(x) (((x&LIVE)==DEAD)&&(!(IsPlague(x))))
+#define IsDevilFull(x) ((x&DEVIL_FULL) == DEVIL_FULL)
 #define EraseDevil(x) (x&0xE0)
 #define AngelCure(x) (x&0xC0)
 
@@ -28,6 +29,12 @@ struct unit
 
 struct MAP{
     unsigned char d;
+};
+
+struct devil
+{
+	struct unit u;
+	struct list_elem el;
 };
 
 struct MAP *** map;
@@ -72,8 +79,7 @@ void free_3d(void *** data)
 	free(data[0]);
 	free(data);
 }
-
-/**********************************************
+/************************************************
  * Devil의 생성 및 초기화
  * s : 해당 setup
  *
@@ -82,12 +88,21 @@ void free_3d(void *** data)
 struct unit devil_init(struct setup *s)
 {
     struct unit d;
+	struct devil * dev;
 	//devil의 초기 위치 설정
     d.x = uniform(0,s->map_size-1,s->SEED_DVL_GEN_X);
     d.y = uniform(0,s->map_size-1,s->SEED_DVL_GEN_Y);
     d.z = uniform(0,s->map_size-1,s->SEED_DVL_GEN_Z);
 	//devil 맵 입력
-	map[d.x][d.y][d.z].d += 1;
+	if(IsDevilFull(map[d.x][d.y][d.z].d))	//데빌 넣을 공간이 없다면
+	{
+		dev = (struct devil*)malloc(sizeof(struct devil));
+		dev->u.x = d.x;
+		dev->u.y = d.y;
+		dev->u.z = d.z;
+		list_push_back(&devil_list,&(dev->el));
+	}else
+		map[d.x][d.y][d.z].d += 1;
 
     //devil 사이즈 증가
 	devil_size++;
@@ -96,12 +111,16 @@ struct unit devil_init(struct setup *s)
 }
 
 /*************************************************
- * Devil을 제거하는 함수
- * ***********************************************/
-void devil_remove(struct MAP * m)
+ *  * Devil을 제거하는 함수
+ *   * 제거후 다음 devil값을 반환
+ *    * ***********************************************/
+struct devil * devil_list_remove(struct devil *d)
 {
-    m->d--;
+	struct devil * next = list_entry(list_next(&(d->el)),struct devil,el);
+	list_remove(&(d->el));
+	free(d);
 	devil_size--;
+	return next;
 }
 
 /*************************************************
@@ -221,7 +240,7 @@ void cell_check(struct setup * s, int x, int y, int z, int * leftCount, int * mi
                             (*middleCount)++;
                         if(i|j|k != 0)//자기자신은 뺀다
                             count++;
-                    }else if(IsPlague(map[x+i][y+j][z+k].d))
+                    }else if(IsPlague(map[x+i][y+j][z+k].d))	//주위에 플래그가 있나?
 					{
 						if(k==0)
 							(*leftP) = true;
@@ -258,7 +277,7 @@ void cell_check(struct setup * s, int x, int y, int z, int * leftCount, int * mi
 					if(IsLive(map[x+i][y+j][z+1].d))
 					{
 						(*middleCount)++;
-					}else if(IsPlague(map[x+i][y+j][z+1].d))
+					}else if(IsPlague(map[x+i][y+j][z+1].d))	//주위에 플래그가 있나?
 						*middleP = true;
 				}
 			}
@@ -283,7 +302,7 @@ void cell_check(struct setup * s, int x, int y, int z, int * leftCount, int * mi
 		}
 	}
 
-	if(P&&(!(IsPlague(map[x][y][z].d))))
+	if(P&&(!(IsPlague(map[x][y][z].d))))	//주위에 플래그가 있고 이 타일이 플래그가 아니라면 change
 		map[x][y][z].d ^= CHANGE;
 }
 
@@ -320,7 +339,7 @@ void map_print(struct setup * s, FILE * save)
  * *********************************************/
 void pos_print(struct setup * s, FILE * save)
 {
-	struct list x_same, y_same;
+	struct devil * dev;
 	int i;
 	int x,y,z;
 	int num;
@@ -341,11 +360,23 @@ void pos_print(struct setup * s, FILE * save)
 				{
 					fprintf(save,"(%d, %d, %d)\n",x,y,z);
 				}
-				//if(NumOfDevil(map[x][y][z].d)==0x1f)
+				if(IsDevilFull(map[x][y][z].d))	//만약 데빌 칸이 가득찬 상태라면
+				{
+					dev = list_entry(list_begin(&devil_list),struct devil,el);
+					while(1)
+					{
+						if((dev->u.x ==x)&&(dev->u.y==y)&&(dev->u.z==z))	//해당 맵 위치의 데빌이면 출력
+						{
+							fprintf(save,"(%d, %d, %d)\n",x,y,z);
+						}
+						if(list_end(&devil_list)==dev->el.next)	//만약 현 데빌이 마지막이라면 루프 탈출
+							break;
+						dev = list_entry(list_next(&(dev->el)),struct devil,el);	//다음 데빌 지목
+					}
+				}
 			}
 		}
 	}
-	
 }
 
 //임의 정의 함수
@@ -384,6 +415,8 @@ void init_resources (struct setup *s) {
 	//해당 devil지역 plague화
 	map[tem.x][tem.y][tem.z].d|=PLAGUE;
 
+	//데빌 리스트 초기화
+	list_init(&devil_list);
 }
 
 void devil_stage (struct setup *s) {
@@ -393,6 +426,8 @@ void devil_stage (struct setup *s) {
 	int ic, jc,kc;
 	int ie,je,ke;
 	int x,y,z;
+	struct devil * dev = list_entry(list_begin(&devil_list),struct devil,el);
+
 
     if(devil_size==0)//devil이 하나도 없는 상황
     {
@@ -404,6 +439,10 @@ void devil_stage (struct setup *s) {
 		map[tem.x][tem.y][tem.z].d|=PLAGUE;
     }else
 	{
+		//중복devil을 저장한 devil_list 비우기
+		while(!list_empty(&devil_list))
+			dev = devil_list_remove(dev);
+
 		//devil랜덤 이동 계산
 		x=-(uniform(0,2,s->SEED_DVL_MOV_X)-1);
 		y=-(uniform(0,2,s->SEED_DVL_MOV_Y)-1);
@@ -666,7 +705,6 @@ void print_fin_map (struct setup *s) {
 void print_fin_pos (struct setup *s) {
 	FILE * file = fopen("Final_pos.txt","w");
 	pos_print(s,file);
-	printf("%d\n",devil_size);
 	fclose(file);
 }
 
