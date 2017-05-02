@@ -383,6 +383,17 @@ void pos_print(struct setup * s, FILE * save)
 /////////////////////////////////////////////////////////////////////////////////
 //기존 정의 함수
 
+void run_game (struct setup *s) {
+	int i = 0;
+
+	while(i++ < s->total_loop) {
+		devil_stage(s);
+		live_dead_stage(s);
+		plague_stage(s);
+		angel_stage(s);
+	}
+}
+
 void init_resources (struct setup *s) {
     int i,j,k;
     int p = (s->map_size/2)-1;
