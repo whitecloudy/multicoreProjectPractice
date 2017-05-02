@@ -363,7 +363,7 @@ void pos_print(struct setup * s, FILE * save)
 				if(IsDevilFull(map[x][y][z].d))	//만약 데빌 칸이 가득찬 상태라면
 				{
 					dev = list_entry(list_begin(&devil_list),struct devil,el);
-					while(1)
+					while(!list_empty(&devil_list))
 					{
 						if((dev->u.x ==x)&&(dev->u.y==y)&&(dev->u.z==z))	//해당 맵 위치의 데빌이면 출력
 						{
@@ -571,6 +571,9 @@ void angel_stage (struct setup *s) {
 	int i,j,k,p,q,r,num, biggest=0;
 	int xP=0,xM=0,yP=0,yM=0,zP=0,zM=0;
 
+	struct devil * dev;
+	struct list_elem * dev_el;
+
 	if((moveLength/2)>scope)
 		scope = moveLength/2;
 
@@ -609,6 +612,36 @@ void angel_stage (struct setup *s) {
 			
 		}
 		
+	}
+
+	if(!list_empty(&devil_list))	//만약 데빌 중복이 존재한다면
+	{
+		dev_el = list_begin(&devil_list);
+		while(1)
+		{
+			if(list_end(&devil_list)==dev_el)	//만약 현 데빌이 마지막이라면 루프 탈출
+				break;
+
+			dev = list_entry(dev_el,struct devil,el);
+
+			if(dev->u.x>angel.x)
+				xP += num;
+			else if(dev->u.x<angel.x)
+				xM += num;
+
+			if(dev->u.y>angel.y)
+				yP += num;
+			else if(dev->u.y<angel.y)
+				yM += num;
+
+			if(dev->u.z>angel.z)
+				zP += num;
+			else if(dev->u.z<angel.z)
+				zM += num;
+
+			
+			dev_el = list_next(dev_el);
+		}
 	}
 
 	//최대값 검색
@@ -680,6 +713,24 @@ void angel_stage (struct setup *s) {
 			}
 		}
 	}
+
+	if(!list_empty(&devil_list))	//만약 데빌 중복이 존재한다면
+	{
+		dev_el = list_begin(&devil_list);
+
+		dev = list_entry(list_begin(&devil_list),struct devil,el);
+		while(1)
+		{
+			if(list_end(&devil_list)==dev_el)	//만약 현 데빌이 마지막이라면 루프 탈출
+				break;
+			dev = list_entry(dev_el ,struct devil, el);
+
+			if((dev->u.x >= i)&&(dev->u.x <= p)&&(dev->u.y >= j)&&(dev->u.y <= q)&&(dev->u.z >= k)&&(dev->u.z <= r))
+				devil_list_remove(dev);
+
+			dev_el = list_next(dev_el);
+		}
+	}
 }
 
 
@@ -709,5 +760,11 @@ void print_fin_pos (struct setup *s) {
 }
 
 void free_resources (struct setup *s) {
+	struct devil * dev;
+
+	//중복devil을 저장한 devil_list 비우기
+	while(!list_empty(&devil_list))
+		dev = devil_list_remove(dev);
+
 	free_3d(map);
 }
