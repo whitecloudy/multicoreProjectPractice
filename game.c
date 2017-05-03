@@ -1,24 +1,26 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <pthread.h>
 #include "./game.h"
 #include "./list.h"
 #include "./lcgrand.h"
 
-#define DEAD 0x00
-#define LIVE 0x80
-#define PLAGUE 0x20
-#define CHANGE 0x40
-#define DEVIL_FULL 0x1F
+#define DEAD 0x0000
+#define LIVE 0x8000
+#define PLAGUE 0x2000
+#define CHANGE 0x4000
+#define DEVIL_FULL 0x0FFF
+#define DEVIL_MOVEIN 0x1000
 
-#define NumOfDevil(x) (x&0x1F)
+#define NumOfDevil(x) (x&DEVIL_FULL)
 #define IsPlague(x) ((x&PLAGUE)==PLAGUE)
 #define IsChange(x) ((x&CHANGE)==CHANGE)
 #define IsLive(x) (((x&LIVE)==LIVE)&&(!(IsPlague(x))))
 #define IsDead(x) (((x&LIVE)==DEAD)&&(!(IsPlague(x))))
 #define IsDevilFull(x) ((x&DEVIL_FULL) == DEVIL_FULL)
-#define EraseDevil(x) (x&0xE0)
-#define AngelCure(x) (x&0xC0)
-
+#define IsDevilMoveIn(x) ((x&DEVIL_MOVEIN)==DEVIL_MOVEIN)
+#define EraseDevil(x) (x&0xF000)
+#define AngelCure(x) (x&0xC000)
 
 struct unit
 {
@@ -28,7 +30,8 @@ struct unit
 };
 
 struct MAP{
-    unsigned char d;
+    unsigned short d;
+	pthread_mutex_t lock;
 };
 
 struct devil
@@ -42,6 +45,12 @@ struct unit angel;
 struct list devil_list;
 int devil_size=0;
 int start = 0;
+int taskSize = 0;
+pthread_t * thread;
+pthread_attr_t attr;
+pthread_key_t key;
+
+
 
 /***************************************
  * 3차원 메모리를 동적할당
@@ -176,9 +185,9 @@ void devil_mov(struct setup * s, int x ,int y, int z, struct unit * cor)
 	//이동
 	unit_mov(s,x,y,z,cor);
 
-    //들어가는 곳 devil 넣기
+    //movein에 devil 넣기
 	devil_size -= (NumOfDevil(map[cor->x][cor->y][cor->z].d)-1);	//들어올 자리에 중복될 데빌 제거 및 데빌 이동
-    map[cor->x][cor->y][cor->z].d = EraseDevil(map[cor->x][cor->y][cor->z].d)+1;
+    map[cor->x][cor->y][cor->z].d |= DEVIL_MOVEIN;
 
 }
 
@@ -379,6 +388,73 @@ void pos_print(struct setup * s, FILE * save)
 	}
 }
 
+/***************************************************************
+ * Devil의 이동을 입력받은 테스크 크기만큼 행하는 함수
+ * x, y : 테스크 위치
+ * size : 테스크 사이즈
+ * **********************************************************/
+void * devilMoveZTask(void * data)
+{
+	struct setup * s = (struct setup *)((unsigned long *)data)[0];
+	int x = ((unsigned long *)data)[1];
+	int y = ((unsigned long *)data)[2];
+	int size = ((unsigned long *)data)[3];
+	int j,k;
+	struct unit tem;
+	struct unit * m = ((unsigned long*)data)[5];
+
+	tem.x = x;
+	for(j=y ; j<size+y ; j++ )
+	{
+		tem.y = j;
+		for(k=0  ; k<s->map_size ; k++ )
+		{
+			tem.z = k;
+			if(NumOfDevil(map[x][j][k].d)>0)	//devil이 있으면
+			{
+				devil_mov(s,m->x,m->y,m->z,&tem);	//데빌 이동
+				map[tem.x][tem.y][tem.z].d |= PLAGUE;
+
+				tem.x = x;
+				tem.y = j;
+				tem.z = k;
+			}
+		}
+
+	}
+
+}
+
+void * devilMoveConfirm(void * data)
+{
+	struct setup * s = (struct setup *)((unsigned long *)data)[0];
+	int x = ((unsigned long *)data)[1];
+	int y = ((unsigned long *)data)[2];
+	int size = ((unsigned long *)data)[3];
+	int j,k;
+	struct unit tem;
+
+	tem.x = x;
+	for(j=y ; j<size+y ; j++ )
+	{
+		tem.y = j;
+		for(k=0  ; k<s->map_size ; k++ )
+		{
+			tem.z = k;
+			if(IsDevilMoveIn(map[x][j][k].d))
+			{
+				map[x][j][k].d ^= DEVIL_MOVEIN;
+				map[x][j][k].d ++;
+			}
+		}
+	}
+}
+
+static void key_destroy(void * buf)
+{
+	free(buf);
+}
+
 //임의 정의 함수
 /////////////////////////////////////////////////////////////////////////////////
 //기존 정의 함수
@@ -410,10 +486,16 @@ void init_resources (struct setup *s) {
              for(k=0;k<s->map_size;k++)
              {
 				 map[i][j][k].d = (unsigned char)uniform(0,1,s->SEED_MAP)<<7;
+				 pthread_mutex_init(&(map[i][j][k].lock),NULL);
+				 
              }
         }
 
-    }
+	}
+	//멀티쓰레딩 준비
+	thread = (pthread_mutex_t*)malloc(sizeof(pthread_mutex_t)*((s->core_num)-1));
+	pthread_attr_init(&attr);
+	taskSize = s->map_size*s->map_size;
     
     //angel 좌표 초기화
     angel.x = p;
@@ -431,15 +513,14 @@ void init_resources (struct setup *s) {
 }
 
 void devil_stage (struct setup *s) {
-    struct unit tem;
+	unsigned long data[5];
+	int end_point;
+	struct unit tem;
     int i,j,k, num;
-	int is,js,ks;
-	int ic, jc,kc;
-	int ie,je,ke;
 	int x,y,z;
 	struct devil * dev = list_entry(list_begin(&devil_list),struct devil,el);
 
-
+	
     if(devil_size==0)//devil이 하나도 없는 상황
     {
 
@@ -455,72 +536,73 @@ void devil_stage (struct setup *s) {
 			dev = devil_list_remove(dev);
 
 		//devil랜덤 이동 계산
-		x=-(uniform(0,2,s->SEED_DVL_MOV_X)-1);
-		y=-(uniform(0,2,s->SEED_DVL_MOV_Y)-1);
-		z=-(uniform(0,2,s->SEED_DVL_MOV_Z)-1);
-
-		//데빌 검색 순서 지정
-		if(x>0)
-		{
-			is = s->map_size-1;
-			ic = -1;
-			ie = -1;
-		}else
-		{
-			is = 0;
-			ic = 1;
-			ie = s->map_size;
-		}
-
-		if(y>0)
-		{
-			js = s->map_size-1;
-			jc = -1;
-			je = -1;
-		}else
-		{
-			js = 0;
-			jc = 1;
-			je = s->map_size;
-		}
-
-		if(z>0)
-		{
-			ks = s->map_size-1;
-			kc = -1;
-			ke = -1;
-		}else
-		{
-			ks = 0;
-			kc = 1;
-			ke = s->map_size;
-		}
-
+		tem.x=-(uniform(0,2,s->SEED_DVL_MOV_X)-1);
+		tem.y=-(uniform(0,2,s->SEED_DVL_MOV_Y)-1);
+		tem.z=-(uniform(0,2,s->SEED_DVL_MOV_Z)-1);
+	
 		//데빌 찾아서 이동
-		for(i=is ; i!=ie ; i+=ic )
+		i = 0;
+		j = 0; 
+		data[0] = (unsigned long)s;
+		data[3] = (unsigned long)(taskSize/(s->core_num));
+		data[5] = (unsigned long)&tem;
+		
+		while(i<taskSize)
 		{
-			tem.x = i;
-			for(j=js  ; j!=je ; j+=jc )
+			//x, y좌표 정해주기
+			data[1] = (unsigned long)(i/(s->map_size));
+			data[2] = (unsigned long)(i%(s->map_size));
+			//쓰레드에 테스크 할당
+			pthread_create(&(thread[j]),NULL,devilMoveZTask,(void*)data);
+			//할당한 테스크 양 더하기
+			i += data[3];
+			j++;	//다음 코어로
+			if(j==((s->core_num)-1))	//다른 코어는 전부 할당을 완료했다면
 			{
-				tem.y = j;
-				for(k=ks  ; k!=ke ; k+=kc )
-				{
-					tem.z = k;
-					if(NumOfDevil(map[i][j][k].d)>0)	//devil이 있으면
-					{
-						devil_mov(s,x,y,z,&tem);	//데빌 이동
-						map[tem.x][tem.y][tem.z].d |= PLAGUE;
 
-						tem.x = i;
-						tem.y = j;
-						tem.z = k;
-					}
-				}
+				//현 쓰레드에 남은 테스크 할당
+				data[1] = (unsigned long)(i/(s->map_size));
+				data[2] = (unsigned long)(i%(s->map_size));
+				data[3] = taskSize - i;
+				i+=data[3];
+				devilMoveZTask((void*)data);
 
 			}
 
 		}
+	
+		for(i = 0;i<((s->core_num)-1);i++)
+		{
+			pthread_join(thread[i],NULL);
+		}
 
+		i = 0;
+		j = 0;
+		while(i<taskSize)
+		{
+			//x, y좌표 정해주기
+			data[1] = (unsigned long)(i/(s->map_size));
+			data[2] = (unsigned long)(i%(s->map_size));
+			//쓰레드에 테스크 할당
+			pthread_create(&(thread[j]),NULL,devilMoveZTask,(void*)data);
+			//할당한 테스크 양 더하기
+			i += data[3];
+			j++;	//다음 코어로
+			if(j==((s->core_num)-1))	//다른 코어는 전부 할당을 완료했다면
+			{
+
+				//현 쓰레드에 남은 테스크 할당
+				data[1] = (unsigned long)(i/(s->map_size));
+				data[2] = (unsigned long)(i%(s->map_size));
+				data[3] = taskSize - i;
+				i+=data[3];
+				devilMoveZTask((void*)data);
+
+			}
+		}
+
+		pthread_key_delete(key);
+		
 	}
 
 	num = devil_size;
@@ -778,4 +860,5 @@ void free_resources (struct setup *s) {
 		dev = devil_list_remove(dev);
 
 	free_3d(map);
+	free(thread);
 }
