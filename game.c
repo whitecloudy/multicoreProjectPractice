@@ -347,7 +347,7 @@ void * cellCheckTask(void * data)
 	bool leftP, middleP;
 	pthread_mutex_unlock((pthread_mutex_t*)((unsigned long*)data)[3]);
 
-	for(i=start, i<start+size;i++)
+	for(i=start; i<start+size;i++)
 	{
 		leftCount = -1;
 		middleCount = -1;
@@ -476,7 +476,7 @@ void * devilMoveZTask(void * data)
 				pthread_mutex_unlock(&(map[0][i][j].lock));
 
 				//이동
-				unit_mov(s,x,y,z,&tem);
+				unit_mov(s,m->x,m->y,m->z,&tem);
 
 
 				//movein에 devil 넣기
@@ -534,7 +534,6 @@ void run_game (struct setup *s) {
 		live_dead_stage(s);
 		plague_stage(s);
 		angel_stage(s);
-		printf("%d\n",devil_size);
 	}
 }
 
@@ -698,12 +697,19 @@ void devil_stage (struct setup *s) {
 
 	num = devil_size;
 
+
+	for(i=0;i<num;i++)
+	{
+		devil_init(s); 
+	}
+
+	/*
 	//현 데빌의 수만큼 데빌을 생성(데빌의 숫자는 2배가 됨)
 	if(num<(s->core_num*10))
 	{
 		for(i=0;i<num;i++)
 		{
-			tem = devil_init(s); 
+			devil_init(s); 
 		}
 	}else
 	{
@@ -731,7 +737,7 @@ void devil_stage (struct setup *s) {
 		}
 		devil_size += num;
 	}
-
+	*/
 }
 
 void live_dead_stage (struct setup *s) {
