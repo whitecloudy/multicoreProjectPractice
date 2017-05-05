@@ -50,10 +50,6 @@ int avgTaskSize = 0;
 pthread_t * thread;
 pthread_attr_t attr;
 pthread_key_t key;
-int check_x=18;
-int check_y=59;
-int check_z=54;
-
 
 /***************************************
  * 3차원 메모리를 동적할당
@@ -105,6 +101,7 @@ struct unit devil_init(struct setup *s)
     d.x = uniform(0,s->map_size-1,s->SEED_DVL_GEN_X);
     d.y = uniform(0,s->map_size-1,s->SEED_DVL_GEN_Y);
     d.z = uniform(0,s->map_size-1,s->SEED_DVL_GEN_Z);
+	
 	//devil 맵 입력
 	if(IsDevilFull(map[d.x][d.y][d.z].d))	//데빌 넣을 공간이 없다면
 	{
@@ -120,6 +117,46 @@ struct unit devil_init(struct setup *s)
 	devil_size++;
 
 	return d;
+}
+
+/************************************************
+ * Devil의 복사용
+ * s : 해당 setup
+ * *********************************************/
+void devil_copy(struct setup *s)
+{
+    struct unit d;
+	struct devil * dev;
+	//devil의 초기 위치 설정
+    d.x = uniform(0,s->map_size-1,s->SEED_DVL_GEN_X);
+    d.y = uniform(0,s->map_size-1,s->SEED_DVL_GEN_Y);
+    d.z = uniform(0,s->map_size-1,s->SEED_DVL_GEN_Z);
+	
+	pthread_mutex_lock(&(map[d.x][d.y][d.z].lock));
+	//devil 맵 입력
+	if(IsDevilFull(map[d.x][d.y][d.z].d))	//데빌 넣을 공간이 없다면
+	{
+		dev = (struct devil*)malloc(sizeof(struct devil));
+		dev->u.x = d.x;
+		dev->u.y = d.y;
+		dev->u.z = d.z;
+		list_push_back(&devil_list,&(dev->el));
+	}else
+		map[d.x][d.y][d.z].d += 1;
+	pthread_mutex_unlock(&(map[d.x][d.y][d.z].lock));
+
+}
+
+void * devilCopyTask(void * data)
+{
+	int task_size = ((unsigned long *)data)[0];
+	struct setup * s = (struct setup *)((unsigned long *)data)[1];
+	int i;
+
+	for(i=0;i<task_size;i++)
+	{
+		devil_copy(s);
+	}
 }
 
 /*************************************************
@@ -173,30 +210,7 @@ void unit_mov(struct setup * s, const int x, const int y, const int z, struct un
 	}
 }
 
-/**************************************************************
- * devil의 이동과 함께 중복제거를 관장함
- * s : 해당 setup
- * x, y, z : 이동해야하는 양
- * cor : 이동할 devil 위치
- * ************************************************************/
-int devil_mov(struct setup * s, const int x ,const int y, const int z, struct unit * cor)
-{
-	int d_size=0;
 
-	//나가는 devil 빼기
-	d_size -= NumOfDevil(map[cor->x][cor->y][cor->z].d);	//이동할 데빌 및 해당 자리 중복 데빌 제거
-	map[cor->x][cor->y][cor->z].d = EraseDevil(map[cor->x][cor->y][cor->z].d);	//맵상에 존재하는 데빌 제거
-
-	//이동
-	unit_mov(s,x,y,z,cor);
-
-    //movein에 devil 넣기
-	d_size -= (NumOfDevil(map[cor->x][cor->y][cor->z].d)-1);	//들어올 자리에 중복될 데빌 제거 및 데빌 이동
-    map[cor->x][cor->y][cor->z].d |= DEVIL_MOVEIN;
-
-	return d_size;
-
-}
 
 /**********************************************************************************
  * 입력받은 좌표의 셀 주위를 확인한 후 live or dead를 결정 혹은 플래그 스테이지
@@ -322,6 +336,35 @@ void cell_check(struct setup * s, int x, int y, int z, int * leftCount, int * mi
 		map[x][y][z].d ^= CHANGE;
 }
 
+void * cellCheckTask(void * data)
+{
+	const struct setup * s = (struct setup *)((unsigned long *)data)[0];
+	const int start = ((unsigned long *)data)[1];
+	const int size = ((unsigned long *)data)[2];
+	int i,j;
+	int x,y,z;
+	int leftCount, middleCount;
+	bool leftP, middleP;
+	pthread_mutex_unlock((pthread_mutex_t*)((unsigned long*)data)[3]);
+
+	for(i=start, i<start+size;i++)
+	{
+		leftCount = -1;
+		middleCount = -1;
+		leftP = false;
+		middleP = false;
+		for( j=0 ; j<s->map_size ; j++ )
+		{
+			x = i/s->map_size;
+			y = i%s->map_size;
+			z = j;
+
+			cell_check(s,x,y,z,&leftCount,&middleCount,&leftP,&middleP);
+
+		}
+	}
+		
+}
 
 
 /*********************************************
@@ -419,12 +462,27 @@ void * devilMoveZTask(void * data)
 		{
 			if(NumOfDevil(map[0][i][j].d)>0)	//devil이 있으면
 			{
+				
 				tem.x = i/s->map_size;
 				tem.y = i%s->map_size;
 				tem.z = j;
 
-				d_size += devil_mov(s,m->x,m->y,m->z,&tem);	//데빌 이동
+				//현 좌표 lock
+				pthread_mutex_lock(&(map[0][i][j].lock));
+				//나가는 devil 빼기
+				d_size -= NumOfDevil(map[0][i][j].d);	//이동할 데빌 및 해당 자리 중복 데빌 제거
+				map[0][i][j].d = EraseDevil(map[0][i][j].d);	//맵상에 존재하는 데빌 제거
+				//현 좌표 unlock
+				pthread_mutex_unlock(&(map[0][i][j].lock));
 
+				//이동
+				unit_mov(s,x,y,z,&tem);
+
+
+				//movein에 devil 넣기
+				pthread_mutex_lock(&(map[tem.x][tem.y][tem.z].lock));
+				map[tem.x][tem.y][tem.z].d |= DEVIL_MOVEIN;
+				pthread_mutex_unlock(&(map[tem.x][tem.y][tem.z].lock));
 			}
 		}
 	}
@@ -437,6 +495,7 @@ void * devilMoveConfirm(void * data)
 	const int start = ((unsigned long *)data)[1];
 	const int size = ((unsigned long *)data)[2];
 	int i,j;
+	int d_size = 0;
 
 	pthread_mutex_unlock((pthread_mutex_t*)((unsigned long*)data)[4]);
 
@@ -446,12 +505,16 @@ void * devilMoveConfirm(void * data)
 		{
 			if(IsDevilMoveIn(map[0][i][j].d))	//들어와야할 데빌이 존재하면
 			{
-				map[0][i][j].d = EraseDevil(map[0][i][j].d) + 1;
-				map[0][i][j].d ^= DEVIL_MOVEIN;
-				map[0][i][j].d |= PLAGUE;
+				d_size -= NumOfDevil(map[0][i][j].d);	//해당 위치에 데빌 전부 제외
+				d_size ++;	//데빌 한마리 추가
+				map[0][i][j].d = EraseDevil(map[0][i][j].d) + 1;	//해당 위치의 데빌 전부 삭제후 데빌 1마리 추가
+				map[0][i][j].d ^= DEVIL_MOVEIN;	//무브인 0로 복귀
+				map[0][i][j].d |= PLAGUE;	//해당위치 플래그
 			}
 		}
 	}
+
+	return d_size;
 }
 
 static void key_destroy(void * buf)
@@ -557,6 +620,7 @@ void devil_stage (struct setup *s) {
 		data[3] = (unsigned long)&tem;
 		data[4] = (unsigned long)&lock;
 		
+		//데빌 이동 시작
 		while(i<totalTaskSize)
 		{
 			pthread_mutex_lock(&lock);
@@ -586,6 +650,7 @@ void devil_stage (struct setup *s) {
 		}
 		
 	
+		//데빌 이동 종료
 		for(i = 0;i<((s->core_num)-1);i++)
 		{
 			pthread_join(thread[i],&d_size);
@@ -594,6 +659,7 @@ void devil_stage (struct setup *s) {
 		
 		i = 0;
 		j = 0;
+		//데빌 이동 확정 시작
 		while(i<totalTaskSize)
 		{
 			pthread_mutex_lock(&lock);
@@ -602,7 +668,7 @@ void devil_stage (struct setup *s) {
 
 			if(j==((s->core_num)-1))	//다른 코어는 전부 할당을 완료했다면
 			{
-				devilMoveConfirm((void*)data);
+				devil_size += devilMoveConfirm((void*)data);
 
 			}else if(j==0)	//첫번째 쓰레드라면
 			{
@@ -624,38 +690,94 @@ void devil_stage (struct setup *s) {
 
 		for(i = 0;i<((s->core_num)-1);i++)
 		{
-			pthread_join(thread[i],NULL);
+			pthread_join(thread[i],&d_size);
+			devil_size += (int)d_size;
 		}
+		//데빌 이동 확정 종료
 	}
 
 	num = devil_size;
 
 	//현 데빌의 수만큼 데빌을 생성(데빌의 숫자는 2배가 됨)
-	for(i=0;i<num;i++)
+	if(num<(s->core_num*10))
 	{
-		tem = devil_init(s); 
+		for(i=0;i<num;i++)
+		{
+			tem = devil_init(s); 
+		}
+	}else
+	{
+		j = num/s->core_num;
+		for(i=0;i<s->core_num;i++)
+		{
+			data[0] = j;
+			data[1] = (unsigned long)s;
+			if(i==0)
+			{
+				data[0] += num%s->core_num;
+				pthread_create(&(thread[i]),NULL,devilCopyTask,(void*)data);
+			}else if(i==s->core_num-1)
+			{
+				devilCopyTask((void*)data);
+			}else
+			{
+				pthread_create(&(thread[i]),NULL,devilCopyTask,(void*)data);
+			}
+		}
+		
+		for(i = 0;i<s->core_num;i++)
+		{
+			pthread_join(thread[i],NULL);
+		}
+		devil_size += num;
 	}
 
 }
 
 void live_dead_stage (struct setup *s) {
 	int i,j,k;
-	int leftCount, middleCount;
-	char leftP, middleP;
-	//각 셀을 돌아가면서 확인
-	for(i = 0;i<s->map_size;i++)
+	pthread_mutex_t lock;
+	unsigned long data[4];
+
+	//쓰레드 할당 준비
+	pthread_mutex_init(&lock,NULL);
+	i = 0;
+	j = 0; 
+	data[0] = (unsigned long)s;
+	data[3] = (unsigned long)&lock;
+
+	//셀 체크 시작
+	while(i<totalTaskSize)
 	{
-		for(j=0;j<s->map_size;j++)
+		pthread_mutex_lock(&lock);
+		data[1] = (unsigned long)i;
+		data[2] = (unsigned long)avgTaskSize;
+
+		if(j==((s->core_num)-1))	//다른 코어는 전부 할당을 완료했다면
 		{
-			leftCount = -1;
-			middleCount = -1;
-			leftP = false;
-			middleP = false;
-			for(k=0;k<s->map_size;k++)
-			{
-				cell_check(s,i,j,k,&leftCount,&middleCount,&leftP,&middleP);
-			}
+			cellCheckTask((void*)data);
+
+		}else if(j==0)	//첫번째 쓰레드라면
+		{
+			data[2] += totalTaskSize%avgTaskSize;	//남는 잔여 task까지 부담시킨다
+			//쓰레드에 테스크 할당
+			pthread_create(&(thread[j]),NULL,cellCheckTask,(void*)data);
+
+		}else
+		{
+			//쓰레드에 테스크 할당
+			pthread_create(&(thread[j]),NULL,cellCheckTask,(void*)data);
 		}
+
+		//할당한 테스크 양 더하기
+		i += data[2];
+		j++;	//다음 코어로
+
+	}
+
+	for(i = 0; i<(s->core_num-1);i++)
+	{
+		pthread_join(thread[i],NULL);
 	}
 
 	//확인이 끝나면 변경해야 될 셀들을 찾아서 변경
