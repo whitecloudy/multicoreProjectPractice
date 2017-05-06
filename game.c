@@ -372,6 +372,58 @@ void * cellCheckTask(void * data)
 }
 
 
+void * angelSearchTask(void * data)
+{
+	const struct setup * s = (struct setup *)((unsigned long *)data)[0];
+	const int start = ((unsigned long *)data)[1];
+	const int size = ((unsigned long *)data)[2];
+	int i,j,num;
+	int x,y,z;
+	int * result = (int*)calloc(sizeof(int),6);	//결과값을 담을 변수
+	
+	pthread_mutex_unlock((pthread_mutex_t*)((unsigned long*)data)[3]);
+
+
+	for(i=start ; i<(start+size) ; i++ )
+	{
+		x = i/s->map_size;
+		if(x == angel.x)	//엔젤 선상에 있는 데빌은 세지 않는다
+			continue;
+		y = i%s->map_size;
+		if(y == angel.y)
+			continue;
+		for( j=0 ; j<s->map_size ; j++ )
+		{
+			z = j;
+			if(z == angel.z)
+				continue;
+			
+			num = NumOfDevil(map[0][i][j].d);
+			if(num!=0)	//데빌 숫자가 0이 아니라면
+			{
+				if(x>angel.x)
+					result[0] += num;
+				else
+					result[1] += num;
+
+				if(y>angel.y)
+					result[2] += num;
+				else
+					result[3] += num;
+
+				if(z>angel.z)
+					result[4] += num;
+				else
+					result[5] += num;
+			}
+		}
+	}
+
+
+	return (void*)result;
+}
+
+
 /*********************************************
  * 맵을 입력받은 파일에 저장하는 함수
  ******************************************/
@@ -821,49 +873,71 @@ void angel_stage (struct setup *s) {
 	int x,y,z;
 	int i,j,k,p,q,r,num, biggest=0;
 	int xP=0,xM=0,yP=0,yM=0,zP=0,zM=0;
+	int * result;
 
 	struct devil * dev;
 	struct list_elem * dev_el;
+	pthread_mutex_t lock;
+	unsigned long data[7];
+
 
 	if((moveLength/2)>scope)
 		scope = moveLength/2;
+	
+	//쓰레드 할당 준비
+	pthread_mutex_init(&lock,NULL);
+	i = 0;
+	j = 0; 
+	data[0] = (unsigned long)s;
+	data[3] = (unsigned long)&lock;
 
-	//각 데빌의 위치를 검색
-	for( i=0 ; i<s->map_size ; i++ )
+	//셀 체크 시작
+	while(i<totalTaskSize)
 	{
-		if(i==angel.x)	//엔젤 선상에 있는 데빌은 세지 않는다
-			continue;
-		for( j=0 ; j<s->map_size ; j++ )
+		pthread_mutex_lock(&lock);
+		data[1] = (unsigned long)i;
+		data[2] = (unsigned long)avgTaskSize;
+
+		if(j==((s->core_num)-1))	//다른 코어는 전부 할당을 완료했다면
 		{
-			if(j==angel.y)
-				continue;
-			for( k=0 ; k<s->map_size ; k++ )
-			{
-				if(k==angel.z)
-					continue;
-				num = NumOfDevil(map[i][j][k].d);
-				if(num!=0)	//데빌 숫자가 0이 아니라면
-				{
-					if(i>angel.x)
-						xP += num;
-					else
-						xM += num;
+			result = angelSearchTask((void*)data);
+			xP += result[0];
+			xM += result[1];
+			yP += result[2];
+			yM += result[3];
+			zP += result[4];
+			zM += result[5];
+			free(result);
+		}else if(j==0)	//첫번째 쓰레드라면
+		{
+			data[2] += totalTaskSize%avgTaskSize;	//남는 잔여 task까지 부담시킨다
+			//쓰레드에 테스크 할당
+			pthread_create(&(thread[j]),NULL,angelSearchTask,(void*)data);
 
-					if(j>angel.y)
-						yP += num;
-					else
-						yM += num;
-
-					if(k>angel.z)
-						zP += num;
-					else
-						zM += num;
-				}
-			}
-			
+		}else
+		{
+			//쓰레드에 테스크 할당
+			pthread_create(&(thread[j]),NULL,angelSearchTask,(void*)data);
 		}
-		
+
+		//할당한 테스크 양 더하기
+		i += data[2];
+		j++;	//다음 코어로
+
 	}
+
+	for(i = 0; i<(s->core_num-1);i++)
+	{
+		pthread_join(thread[i],&result);
+		xP += result[0];
+		xM += result[1];
+		yP += result[2];
+		yM += result[3];
+		zP += result[4];
+		zM += result[5];
+		free(result);
+	}
+
 
 	if(!list_empty(&devil_list))	//만약 데빌 중복이 존재한다면
 	{
@@ -876,21 +950,21 @@ void angel_stage (struct setup *s) {
 			dev = list_entry(dev_el,struct devil,el);
 
 			if(dev->u.x>angel.x)
-				xP += num;
+				xP ++;
 			else if(dev->u.x<angel.x)
-				xM += num;
+				xM ++;
 
 			if(dev->u.y>angel.y)
-				yP += num;
+				yP ++;
 			else if(dev->u.y<angel.y)
-				yM += num;
+				yM ++;
 
 			if(dev->u.z>angel.z)
-				zP += num;
+				zP ++;
 			else if(dev->u.z<angel.z)
-				zM += num;
+				zM ++;
 
-			
+
 			dev_el = list_next(dev_el);
 		}
 	}
@@ -928,7 +1002,7 @@ void angel_stage (struct setup *s) {
 	{
 		unit_mov(s,0,0,-moveLength,&angel);
 	}
-	
+
 	//scope 범위 저장
 	i = angel.x - scope;
 	j = angel.y - scope;
