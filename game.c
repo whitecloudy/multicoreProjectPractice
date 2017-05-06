@@ -50,6 +50,7 @@ int avgTaskSize = 0;
 pthread_t * thread;
 pthread_attr_t attr;
 pthread_key_t key;
+pthread_mutex_t uniform_lock;
 
 /***************************************
  * 3차원 메모리를 동적할당
@@ -128,10 +129,12 @@ void devil_copy(struct setup *s)
     struct unit d;
 	struct devil * dev;
 	//devil의 초기 위치 설정
+	pthread_mutex_lock(&uniform_lock);
     d.x = uniform(0,s->map_size-1,s->SEED_DVL_GEN_X);
     d.y = uniform(0,s->map_size-1,s->SEED_DVL_GEN_Y);
     d.z = uniform(0,s->map_size-1,s->SEED_DVL_GEN_Z);
-	
+	pthread_mutex_unlock(&uniform_lock);
+
 	pthread_mutex_lock(&(map[d.x][d.y][d.z].lock));
 	//devil 맵 입력
 	if(IsDevilFull(map[d.x][d.y][d.z].d))	//데빌 넣을 공간이 없다면
@@ -152,6 +155,8 @@ void * devilCopyTask(void * data)
 	int task_size = ((unsigned long *)data)[0];
 	struct setup * s = (struct setup *)((unsigned long *)data)[1];
 	int i;
+
+	pthread_mutex_unlock((pthread_mutex_t *)((unsigned long *)data)[2]);
 
 	for(i=0;i<task_size;i++)
 	{
@@ -564,6 +569,7 @@ void init_resources (struct setup *s) {
 	pthread_attr_init(&attr);
 	totalTaskSize = s->map_size*s->map_size;
 	avgTaskSize = totalTaskSize/(s->core_num);
+	pthread_mutex_init(&uniform_lock,NULL);
     
     //angel 좌표 초기화
     angel.x = p;
@@ -696,14 +702,13 @@ void devil_stage (struct setup *s) {
 	}
 
 	num = devil_size;
-
-
+	
+	/*
 	for(i=0;i<num;i++)
 	{
 		devil_init(s); 
 	}
-
-	/*
+	*/
 	//현 데빌의 수만큼 데빌을 생성(데빌의 숫자는 2배가 됨)
 	if(num<(s->core_num*10))
 	{
@@ -714,8 +719,10 @@ void devil_stage (struct setup *s) {
 	}else
 	{
 		j = num/s->core_num;
+		data[2] = (unsigned long)&lock;
 		for(i=0;i<s->core_num;i++)
 		{
+			pthread_mutex_lock(&lock);
 			data[0] = j;
 			data[1] = (unsigned long)s;
 			if(i==0)
@@ -737,7 +744,6 @@ void devil_stage (struct setup *s) {
 		}
 		devil_size += num;
 	}
-	*/
 }
 
 void live_dead_stage (struct setup *s) {
