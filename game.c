@@ -9,8 +9,9 @@
 #define LIVE 0x8000
 #define PLAGUE 0x2000
 #define CHANGE 0x4000
-#define DEVIL_FULL 0x0FFF
+#define DEVIL_FULL 0x07FF
 #define DEVIL_MOVEIN 0x1000
+#define MAP_LOCK 0x0800
 
 #define NumOfDevil(x) (x&DEVIL_FULL)
 #define IsPlague(x) ((x&PLAGUE)==PLAGUE)
@@ -19,8 +20,9 @@
 #define IsDead(x) (((x&LIVE)==DEAD)&&(!(IsPlague(x))))
 #define IsDevilFull(x) ((x&DEVIL_FULL) == DEVIL_FULL)
 #define IsDevilMoveIn(x) ((x&DEVIL_MOVEIN)==DEVIL_MOVEIN)
-#define EraseDevil(x) (x&0xF000)
-#define AngelCure(x) (x&0xC000)
+#define IsMapLock(x) ((x&MAP_LOCK)==MAP_LOCK)
+#define EraseDevil(x) (x&0xF800)
+#define AngelCure(x) (x&0xC800)
 
 struct unit
 {
@@ -31,7 +33,6 @@ struct unit
 
 struct MAP{
     unsigned short d;
-	pthread_mutex_t lock;
 };
 
 struct devil
@@ -40,9 +41,19 @@ struct devil
 	struct list_elem el;
 };
 
+struct map_mutex
+{
+	struct unit u;
+	pthread_mutex_t lock;
+	struct list_elem el;
+};
+
 struct MAP *** map;
 struct unit angel;
 struct list devil_list;
+struct list map_mutex_list;
+pthread_mutex_t mutex_list_lock;
+
 int devil_size=0;
 int start = 0;
 int totalTaskSize = 0;
@@ -88,6 +99,20 @@ void free_3d(void *** data)
 	free(data[0]);
 	free(data);
 }
+
+void mapLock(struct MAP * cor)
+{
+	while(IsMapLock(cor->d))
+		continue;
+	cor->d ^= MAP_LOCK;
+}
+
+void mapUnlock(struct MAP * cor)
+{
+	cor->d &= 0xF7FF;
+}
+
+
 /************************************************
  * Devil의 생성 및 초기화
  * s : 해당 setup
@@ -135,7 +160,7 @@ void devil_copy(struct setup *s)
     d.z = uniform(0,s->map_size-1,s->SEED_DVL_GEN_Z);
 	pthread_mutex_unlock(&uniform_lock);
 
-	pthread_mutex_lock(&(map[d.x][d.y][d.z].lock));
+	mapLock(&map[d.x][d.y][d.z]);
 	//devil 맵 입력
 	if(IsDevilFull(map[d.x][d.y][d.z].d))	//데빌 넣을 공간이 없다면
 	{
@@ -146,7 +171,7 @@ void devil_copy(struct setup *s)
 		list_push_back(&devil_list,&(dev->el));
 	}else
 		map[d.x][d.y][d.z].d += 1;
-	pthread_mutex_unlock(&(map[d.x][d.y][d.z].lock));
+	mapUnlock(&map[d.x][d.y][d.z]);
 
 }
 
@@ -525,21 +550,22 @@ void * devilMoveZTask(void * data)
 				tem.z = j;
 
 				//현 좌표 lock
-				pthread_mutex_lock(&(map[0][i][j].lock));
+				mapLock(&map[0][i][j]);
 				//나가는 devil 빼기
 				d_size -= NumOfDevil(map[0][i][j].d);	//이동할 데빌 및 해당 자리 중복 데빌 제거
 				map[0][i][j].d = EraseDevil(map[0][i][j].d);	//맵상에 존재하는 데빌 제거
 				//현 좌표 unlock
-				pthread_mutex_unlock(&(map[0][i][j].lock));
+
+				mapUnlock(&map[0][i][j]);
 
 				//이동
 				unit_mov(s,m->x,m->y,m->z,&tem);
 
 
 				//movein에 devil 넣기
-				pthread_mutex_lock(&(map[tem.x][tem.y][tem.z].lock));
+				mapLock(&map[0][i][j]);
 				map[tem.x][tem.y][tem.z].d |= DEVIL_MOVEIN;
-				pthread_mutex_unlock(&(map[tem.x][tem.y][tem.z].lock));
+				mapUnlock(&map[0][i][j]);
 			}
 		}
 	}
@@ -609,8 +635,7 @@ void init_resources (struct setup *s) {
         { 
              for(k=0;k<s->map_size;k++)
              {
-				 map[i][j][k].d = (unsigned char)uniform(0,1,s->SEED_MAP)<<15;
-				 pthread_mutex_init(&(map[i][j][k].lock),NULL);
+				 map[i][j][k].d = (unsigned short)uniform(0,1,s->SEED_MAP)<<15;
 				 
              }
         }
@@ -622,6 +647,7 @@ void init_resources (struct setup *s) {
 	totalTaskSize = s->map_size*s->map_size;
 	avgTaskSize = totalTaskSize/(s->core_num);
 	pthread_mutex_init(&uniform_lock,NULL);
+	pthread_mutex_init(&mutex_list_lock,NULL);
     
     //angel 좌표 초기화
     angel.x = p;
@@ -636,6 +662,7 @@ void init_resources (struct setup *s) {
 
 	//데빌 리스트 초기화
 	list_init(&devil_list);
+	list_init(&map_mutex_list);
 }
 
 void devil_stage (struct setup *s) {
