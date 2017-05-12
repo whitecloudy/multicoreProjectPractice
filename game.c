@@ -26,13 +26,13 @@
 
 struct unit
 {
-    int x;
-    int y;
-    int z;
+	int x;
+	int y;
+	int z;
 };
 
 struct MAP{
-    unsigned short d;
+	unsigned short d;
 };
 
 struct devil
@@ -55,13 +55,40 @@ struct list map_mutex_list;
 pthread_mutex_t mutex_list_lock;
 
 int devil_size=0;
+pthread_mutex_t devil_size_lock;
+
 int start = 0;
 int totalTaskSize = 0;
 int avgTaskSize = 0;
 pthread_t * thread;
-pthread_attr_t attr;
 pthread_key_t key;
 pthread_mutex_t uniform_lock;
+pthread_mutex_t mainThreadLock;
+int * thread_result;
+struct unit m;
+
+int xP;
+int xM;
+int yP;
+int yM;
+int zP;
+int zM;
+
+int threadDone = 0;
+pthread_mutex_t done_mutex;
+
+pthread_mutex_t angelCheck;
+
+pthread_mutex_t * thread_mutex;
+
+pthread_cond_t devilMoveCond;
+pthread_cond_t devilMoveConfirmCond;
+pthread_cond_t devilCopyCond;
+pthread_cond_t cellCheckCond;
+pthread_cond_t cellConfirmCond;
+pthread_cond_t angelSearchCond;
+pthread_cond_t threadDoneCond;
+
 
 /***************************************
  * 3차원 메모리를 동적할당
@@ -121,13 +148,13 @@ void mapUnlock(struct MAP * cor)
  * *********************************************/
 struct unit devil_init(struct setup *s)
 {
-    struct unit d;
+	struct unit d;
 	struct devil * dev;
 	//devil의 초기 위치 설정
-    d.x = uniform(0,s->map_size-1,s->SEED_DVL_GEN_X);
-    d.y = uniform(0,s->map_size-1,s->SEED_DVL_GEN_Y);
-    d.z = uniform(0,s->map_size-1,s->SEED_DVL_GEN_Z);
-	
+	d.x = uniform(0,s->map_size-1,s->SEED_DVL_GEN_X);
+	d.y = uniform(0,s->map_size-1,s->SEED_DVL_GEN_Y);
+	d.z = uniform(0,s->map_size-1,s->SEED_DVL_GEN_Z);
+
 	//devil 맵 입력
 	if(IsDevilFull(map[d.x][d.y][d.z].d))	//데빌 넣을 공간이 없다면
 	{
@@ -139,7 +166,7 @@ struct unit devil_init(struct setup *s)
 	}else
 		map[d.x][d.y][d.z].d += 1;
 
-    //devil 사이즈 증가
+	//devil 사이즈 증가
 	devil_size++;
 
 	return d;
@@ -151,13 +178,13 @@ struct unit devil_init(struct setup *s)
  * *********************************************/
 void devil_copy(struct setup *s)
 {
-    struct unit d;
+	struct unit d;
 	struct devil * dev;
 	//devil의 초기 위치 설정
 	pthread_mutex_lock(&uniform_lock);
-    d.x = uniform(0,s->map_size-1,s->SEED_DVL_GEN_X);
-    d.y = uniform(0,s->map_size-1,s->SEED_DVL_GEN_Y);
-    d.z = uniform(0,s->map_size-1,s->SEED_DVL_GEN_Z);
+	d.x = uniform(0,s->map_size-1,s->SEED_DVL_GEN_X);
+	d.y = uniform(0,s->map_size-1,s->SEED_DVL_GEN_Y);
+	d.z = uniform(0,s->map_size-1,s->SEED_DVL_GEN_Z);
 	pthread_mutex_unlock(&uniform_lock);
 
 	mapLock(&map[d.x][d.y][d.z]);
@@ -175,19 +202,7 @@ void devil_copy(struct setup *s)
 
 }
 
-void * devilCopyTask(void * data)
-{
-	int task_size = ((unsigned long *)data)[0];
-	struct setup * s = (struct setup *)((unsigned long *)data)[1];
-	int i;
 
-	pthread_mutex_unlock((pthread_mutex_t *)((unsigned long *)data)[2]);
-
-	for(i=0;i<task_size;i++)
-	{
-		devil_copy(s);
-	}
-}
 
 /*************************************************
  *  * Devil을 제거하는 함수
@@ -278,29 +293,29 @@ void cell_check(struct setup * s, int x, int y, int z, int * leftCount, int * mi
 		r=0;
 	else
 		r=1;
-    
-    //첫번째 자리인 경우
-    if(((*leftCount)==-1)&&((*middleCount)==-1))
-    {
-        *leftCount = 0;
-        *middleCount = 0;
-        //이웃 셀 중 LIVE인 것들을 체크
-        for(k=zs;k<=r;k++)
-        {
-            for(j=ys;j<=q;j++)
-            {
-                for(i=xs;i<=p;i++)
-                {
-                    //라이브 셀 카운트
-                    if(IsLive(map[x+i][y+j][z+k].d))
-                    {
-                        if(k==0)
-                            (*leftCount)++;
-                        else if(k==1)
-                            (*middleCount)++;
-                        if(i|j|k != 0)//자기자신은 뺀다
-                            count++;
-                    }else if(IsPlague(map[x+i][y+j][z+k].d))	//주위에 플래그가 있나?
+
+	//첫번째 자리인 경우
+	if(((*leftCount)==-1)&&((*middleCount)==-1))
+	{
+		*leftCount = 0;
+		*middleCount = 0;
+		//이웃 셀 중 LIVE인 것들을 체크
+		for(k=zs;k<=r;k++)
+		{
+			for(j=ys;j<=q;j++)
+			{
+				for(i=xs;i<=p;i++)
+				{
+					//라이브 셀 카운트
+					if(IsLive(map[x+i][y+j][z+k].d))
+					{
+						if(k==0)
+							(*leftCount)++;
+						else if(k==1)
+							(*middleCount)++;
+						if(i|j|k != 0)//자기자신은 뺀다
+							count++;
+					}else if(IsPlague(map[x+i][y+j][z+k].d))	//주위에 플래그가 있나?
 					{
 						if(k==0)
 							(*leftP) = true;
@@ -308,15 +323,15 @@ void cell_check(struct setup * s, int x, int y, int z, int * leftCount, int * mi
 							(*middleP) = true;
 						P = true;
 					}
-                }
-            }
-        }
-        
-    }
+				}
+			}
+		}
+
+	}
 	//첫번째 계산 이후
 	else
-    {
-        count = *leftCount+*middleCount;	//이전 계산값들 추가
+	{
+		count = *leftCount+*middleCount;	//이전 계산값들 추가
 		P = (*leftP)||(*middleP);
 		//다음 타일 계산값 준비
 		*leftCount = *middleCount;
@@ -366,16 +381,12 @@ void cell_check(struct setup * s, int x, int y, int z, int * leftCount, int * mi
 		map[x][y][z].d ^= CHANGE;
 }
 
-void * cellCheckTask(void * data)
+void cellCheckTask(const struct setup * s, const int start, const int size)
 {
-	const struct setup * s = (struct setup *)((unsigned long *)data)[0];
-	const int start = ((unsigned long *)data)[1];
-	const int size = ((unsigned long *)data)[2];
 	int i,j;
 	int x,y,z;
 	int leftCount, middleCount;
 	bool leftP, middleP;
-	pthread_mutex_unlock((pthread_mutex_t*)((unsigned long*)data)[3]);
 
 	for(i=start; i<start+size;i++)
 	{
@@ -393,21 +404,32 @@ void * cellCheckTask(void * data)
 
 		}
 	}
-		
+
+}
+
+void cellConfirm(const struct setup * s,const int start, const int size)
+{
+	int i,j;
+
+	for(i=start ; i<(start+size) ; i++ )
+	{
+		for( j=0 ; j<s->map_size ; j++ )
+		{
+			if(IsChange(map[0][i][j].d))
+			{
+				map[0][i][j].d ^= LIVE;	//live는 dead로 dead 는 live로
+				map[0][i][j].d ^= CHANGE;	//Change flag 제거
+			}
+		}
+	}
 }
 
 
-void * angelSearchTask(void * data)
+void angelSearchTask(const struct setup * s,const int start, const int size)
 {
-	const struct setup * s = (struct setup *)((unsigned long *)data)[0];
-	const int start = ((unsigned long *)data)[1];
-	const int size = ((unsigned long *)data)[2];
 	int i,j,num;
 	int x,y,z;
-	int * result = (int*)calloc(sizeof(int),6);	//결과값을 담을 변수
-	
-	pthread_mutex_unlock((pthread_mutex_t*)((unsigned long*)data)[3]);
-
+	int tem_xP = 0, tem_xM = 0, tem_yP = 0, tem_yM = 0, tem_zP = 0, tem_zM = 0;
 
 	for(i=start ; i<(start+size) ; i++ )
 	{
@@ -422,30 +444,37 @@ void * angelSearchTask(void * data)
 			z = j;
 			if(z == angel.z)
 				continue;
-			
+
 			num = NumOfDevil(map[0][i][j].d);
 			if(num!=0)	//데빌 숫자가 0이 아니라면
 			{
 				if(x>angel.x)
-					result[0] += num;
+					tem_xP += num;
 				else
-					result[1] += num;
+					tem_xM += num;
 
 				if(y>angel.y)
-					result[2] += num;
+					tem_yP += num;
 				else
-					result[3] += num;
+					tem_yM += num;
 
 				if(z>angel.z)
-					result[4] += num;
+					tem_zP += num;
 				else
-					result[5] += num;
+					tem_zM += num;
 			}
 		}
 	}
 
 
-	return (void*)result;
+	pthread_mutex_lock(&angelCheck);
+	xP += tem_xP;
+	xM += tem_xM;
+	yP += tem_yP;
+	yM += tem_yM;
+	zP += tem_zP;
+	zM += tem_zM;
+	pthread_mutex_unlock(&angelCheck);
 }
 
 
@@ -526,17 +555,10 @@ void pos_print(struct setup * s, FILE * save)
  * x, y : 테스크 위치
  * size : 테스크 사이즈
  * **********************************************************/
-void * devilMoveZTask(void * data)
+void devilMoveZTask(const struct setup * s,const int start, const int size)
 {
-	const struct setup * s = (struct setup *)((unsigned long *)data)[0];
-	const int start = ((unsigned long *)data)[1];
-	const int size = ((unsigned long *)data)[2];
 	struct unit tem;
-	const struct unit * m = ((unsigned long*)data)[3];
-	int d_size=0;
 	int i,j;
-
-	pthread_mutex_unlock((pthread_mutex_t*)((unsigned long*)data)[4]);
 
 	for(i=start ; i<(start+size) ; i++ )
 	{
@@ -544,66 +566,240 @@ void * devilMoveZTask(void * data)
 		{
 			if(NumOfDevil(map[0][i][j].d)>0)	//devil이 있으면
 			{
-				
+
 				tem.x = i/s->map_size;
 				tem.y = i%s->map_size;
 				tem.z = j;
 
-				//현 좌표 lock
-				mapLock(&map[0][i][j]);
-				//나가는 devil 빼기
-				d_size -= NumOfDevil(map[0][i][j].d);	//이동할 데빌 및 해당 자리 중복 데빌 제거
-				map[0][i][j].d = EraseDevil(map[0][i][j].d);	//맵상에 존재하는 데빌 제거
-				//현 좌표 unlock
-
-				mapUnlock(&map[0][i][j]);
-
 				//이동
-				unit_mov(s,m->x,m->y,m->z,&tem);
-
+				unit_mov(s,m.x,m.y,m.z,&tem);
 
 				//movein에 devil 넣기
-				mapLock(&map[0][i][j]);
 				map[tem.x][tem.y][tem.z].d |= DEVIL_MOVEIN;
-				mapUnlock(&map[0][i][j]);
 			}
 		}
 	}
-	return d_size;
 }
 
-void * devilMoveConfirm(void * data)
+void devilMoveConfirm(const struct setup * s,const int start, const int size)
 {
-	const struct setup * s = (struct setup *)((unsigned long *)data)[0];
-	const int start = ((unsigned long *)data)[1];
-	const int size = ((unsigned long *)data)[2];
 	int i,j;
 	int d_size = 0;
-
-	pthread_mutex_unlock((pthread_mutex_t*)((unsigned long*)data)[4]);
 
 	for(i=start ; i<(start+size) ; i++ )
 	{
 		for( j=0 ; j<s->map_size ; j++ )
 		{
+			d_size -= NumOfDevil(map[0][i][j].d);	//해당 위치에 데빌 전부 제외
+			map[0][i][j].d = EraseDevil(map[0][i][j].d);	//해당 위치의 데빌 전부 삭제
+
 			if(IsDevilMoveIn(map[0][i][j].d))	//들어와야할 데빌이 존재하면
 			{
-				d_size -= NumOfDevil(map[0][i][j].d);	//해당 위치에 데빌 전부 제외
 				d_size ++;	//데빌 한마리 추가
-				map[0][i][j].d = EraseDevil(map[0][i][j].d) + 1;	//해당 위치의 데빌 전부 삭제후 데빌 1마리 추가
+				map[0][i][j].d+=1;	//해당 위치에 데빌 한마리 추가
 				map[0][i][j].d ^= DEVIL_MOVEIN;	//무브인 0로 복귀
 				map[0][i][j].d |= PLAGUE;	//해당위치 플래그
 			}
 		}
 	}
 
-	return d_size;
+	pthread_mutex_lock(&devil_size_lock);
+	devil_size += d_size;
+	pthread_mutex_unlock(&devil_size_lock);
+}
+
+void devilCopyTask(const struct setup * s,const int task_size)
+{
+	int i;
+
+	for(i=0;i<task_size;i++)
+	{
+		devil_copy(s);
+	}
 }
 
 static void key_destroy(void * buf)
 {
 	free(buf);
 }
+
+void allThreadLock(struct setup * s)
+{
+	int i;
+	for(i=0;i<s->core_num;i++)
+	{
+		printf("2\n");
+		pthread_mutex_lock(&(thread_mutex[i]));
+		printf("2\n");
+	}
+}
+
+void allThreadUnlock(struct setup * s)
+{
+	int i;
+	for(i=0;i<s->core_num;i++)
+	{
+		printf("5\n");
+		pthread_mutex_unlock(&(thread_mutex[i]));
+		printf("6\n");
+	}
+}
+
+void * thread_running(void * data)
+{
+	const struct setup * s = (struct setup *)((unsigned long *)data)[0];
+	const int start = ((unsigned long *)data)[1];
+	const int size = ((unsigned long *)data)[2];
+	const pthread_mutex_t * dataMutex = (pthread_mutex_t*)((unsigned long*)data)[3];
+	const unsigned int thread_num = ((unsigned long *)data)[4];
+
+	int tem;
+
+	pthread_mutex_unlock(dataMutex);
+
+	pthread_mutex_t * threadMutex = &(thread_mutex[thread_num]);
+
+	while(1)
+	{
+		printf("1\n");
+		pthread_cond_wait(&devilMoveCond,threadMutex);
+		printf("3\n");
+		devilMoveZTask(s,start,size);
+		pthread_mutex_lock(&done_mutex);
+		threadDone++;
+		if(threadDone == s->core_num)
+		{
+			pthread_mutex_lock(&mainThreadLock);
+			pthread_cond_signal(&threadDoneCond);
+			pthread_mutex_unlock(&mainThreadLock);
+			threadDone = 0;
+		}
+		pthread_mutex_unlock(&done_mutex);
+		
+		pthread_cond_wait(&devilMoveConfirmCond,threadMutex);
+		devilMoveConfirm(s,start,size);
+		pthread_mutex_lock(&done_mutex);
+		threadDone++;
+		if(threadDone == s->core_num)
+		{
+			pthread_mutex_lock(&mainThreadLock);
+			pthread_cond_signal(&threadDoneCond);
+			pthread_mutex_unlock(&mainThreadLock);
+			threadDone = 0;
+		}
+		pthread_mutex_unlock(&done_mutex);
+
+		pthread_cond_wait(&devilCopyCond,threadMutex);
+		if(thread_num < devil_size%(s->core_num))
+			devilCopyTask(s,devil_size/(s->core_num) + 1);
+		else
+			devilCopyTask(s,devil_size/(s->core_num));
+		pthread_mutex_lock(&done_mutex);
+		threadDone++;
+		if(threadDone == s->core_num)
+		{
+			pthread_mutex_lock(&mainThreadLock);
+			pthread_cond_signal(&threadDoneCond);
+			pthread_mutex_unlock(&mainThreadLock);
+			threadDone = 0;
+		}
+		pthread_mutex_unlock(&done_mutex);
+
+		pthread_cond_wait(&cellCheckCond,threadMutex);
+		cellCheckTask(s,start,size);
+		pthread_mutex_lock(&done_mutex);
+		threadDone++;
+		if(threadDone == s->core_num)
+		{
+			pthread_mutex_lock(&mainThreadLock);
+			pthread_cond_signal(&threadDoneCond);
+			pthread_mutex_unlock(&mainThreadLock);
+			threadDone = 0;
+		}
+		pthread_mutex_unlock(&done_mutex);
+
+		pthread_cond_wait(&cellConfirmCond,threadMutex);
+		cellConfirm(s,start,size);
+		pthread_mutex_lock(&done_mutex);
+		threadDone++;
+		if(threadDone == s->core_num)
+		{
+			pthread_mutex_lock(&mainThreadLock);
+			pthread_cond_signal(&threadDoneCond);
+			pthread_mutex_unlock(&mainThreadLock);
+			threadDone = 0;
+		}
+		pthread_mutex_unlock(&done_mutex);
+
+		pthread_cond_wait(&angelSearchTask,threadMutex);
+		angelSearchTask(s,start,size);
+		pthread_mutex_lock(&done_mutex);
+		threadDone++;
+		if(threadDone == s->core_num)
+		{
+			pthread_mutex_lock(&mainThreadLock);
+			pthread_cond_signal(&threadDoneCond);
+			pthread_mutex_unlock(&mainThreadLock);
+			threadDone = 0;
+		}
+		pthread_mutex_unlock(&done_mutex);
+
+	}
+
+}
+
+void thread_create(struct setup * s)
+{
+	int totalTaskSize = (s->map_size) * (s->map_size);
+	int avgTaskSize = totalTaskSize/(s->core_num);
+	int restTaskSize = totalTaskSize%(s->core_num);
+	int taskSize=0;
+	pthread_mutex_t dataMutex;
+	unsigned long data[5];
+	int i;
+
+
+	pthread_mutex_init(&dataMutex,NULL);
+	data[0] = (unsigned long)s;
+	data[2] = (unsigned long)avgTaskSize;
+	data[3] = (unsigned long)(&dataMutex);
+
+	thread_mutex = (pthread_mutex_t*)malloc(sizeof(pthread_mutex_t)*(s->core_num));
+
+	for( i=0 ; i<s->core_num ; i++ )
+	{
+		pthread_mutex_lock(&dataMutex);
+		data[1] = taskSize;
+		data[4] = i;
+		if(i<restTaskSize)
+		{
+			data[2]++;
+			pthread_create(&thread[i],NULL,thread_running,(void*)data);
+			taskSize += data[2];
+			data[2]--;
+		}else
+		{
+			pthread_create(&thread[i],NULL,thread_running,(void*)data);
+			taskSize += data[2];
+		}
+		pthread_mutex_init(&(thread_mutex[i]),NULL);
+		pthread_mutex_lock(&(thread_mutex[i]));
+	}
+	pthread_mutex_lock(&dataMutex);
+	pthread_cond_init(&threadDoneCond,NULL);
+}
+
+void thread_kill(struct setup * s)
+{
+	int i;
+
+	for( i=0 ; i<s->core_num ; i++ )
+	{
+		pthread_cancel(thread[i]);
+	}
+}
+
+
 
 //임의 정의 함수
 /////////////////////////////////////////////////////////////////////////////////
@@ -615,44 +811,60 @@ void run_game (struct setup *s) {
 	while(i++ < s->total_loop) {
 		devil_stage(s);
 		live_dead_stage(s);
-		plague_stage(s);
+		//plague_stage(s);
 		angel_stage(s);
 	}
+
+	thread_kill(s);
 }
 
 void init_resources (struct setup *s) {
-    int i,j,k;
-    int p = (s->map_size/2)-1;
+	int i,j,k;
+	int p = (s->map_size/2)-1;
 	struct unit tem;
 
-    //맵 데이터 동적할당
-    map = (struct MAP ***)malloc_3d(s->map_size,sizeof(struct MAP));
-    
-    //맵 이니셜라이징
-    for(i = 0; i<s->map_size;i++)
-    { 
-        for(j=0;j<s->map_size;j++)
-        { 
-             for(k=0;k<s->map_size;k++)
-             {
-				 map[i][j][k].d = (unsigned short)uniform(0,1,s->SEED_MAP)<<15;
-				 
-             }
-        }
+	//맵 데이터 동적할당
+	map = (struct MAP ***)malloc_3d(s->map_size,sizeof(struct MAP));
+
+	//맵 이니셜라이징
+	for(i = 0; i<s->map_size;i++)
+	{ 
+		for(j=0;j<s->map_size;j++)
+		{ 
+			for(k=0;k<s->map_size;k++)
+			{
+				map[i][j][k].d = (unsigned short)uniform(0,1,s->SEED_MAP)<<15;
+
+			}
+		}
 
 	}
 	//멀티쓰레딩 준비
-	thread = (pthread_mutex_t*)malloc(sizeof(pthread_mutex_t)*((s->core_num)-1));
-	pthread_attr_init(&attr);
+	thread = (pthread_mutex_t*)malloc(sizeof(pthread_mutex_t)*(s->core_num));
+	thread_result = (int * )malloc(sizeof(int)*(s->core_num));
+	pthread_mutex_init(&devil_size_lock,NULL);
 	totalTaskSize = s->map_size*s->map_size;
 	avgTaskSize = totalTaskSize/(s->core_num);
+
 	pthread_mutex_init(&uniform_lock,NULL);
 	pthread_mutex_init(&mutex_list_lock,NULL);
-    
-    //angel 좌표 초기화
-    angel.x = p;
-    angel.y = p;
-    angel.z = p;
+	pthread_mutex_init(&mainThreadLock,NULL);
+	pthread_mutex_init(&angelCheck,NULL);
+	pthread_mutex_init(&done_mutex,NULL);
+
+	pthread_cond_init(&devilMoveCond,NULL);
+	pthread_cond_init(&devilMoveConfirmCond,NULL);
+	pthread_cond_init(&devilCopyCond,NULL);
+	pthread_cond_init(&cellCheckCond,NULL);
+	pthread_cond_init(&cellConfirmCond,NULL);
+	pthread_cond_init(&angelSearchCond,NULL);
+
+	pthread_mutex_lock(&mainThreadLock);
+
+	//angel 좌표 초기화
+	angel.x = p;
+	angel.y = p;
+	angel.z = p;
 
 	//새로운 devil생성
 	tem = devil_init(s); 
@@ -663,233 +875,83 @@ void init_resources (struct setup *s) {
 	//데빌 리스트 초기화
 	list_init(&devil_list);
 	list_init(&map_mutex_list);
+
+	//쓰레드 생성
+	thread_create(s);
 }
 
 void devil_stage (struct setup *s) {
-	unsigned long data[5];
-	int end_point;
+	int i;
 	struct unit tem;
-    int i,j,k, num;
-	int x,y,z;
-	void * d_size;
 	struct devil * dev = list_entry(list_begin(&devil_list),struct devil,el);
-	pthread_mutex_t lock;
 
-	
-    if(devil_size==0)//devil이 하나도 없는 상황
-    {
+	if(devil_size==0)//devil이 하나도 없는 상황
+	{
 
-        //새로운 devil생성
-        tem = devil_init(s); 
+		//새로운 devil생성
+		tem = devil_init(s); 
 
-        //해당 devil지역 plague화
+		//해당 devil지역 plague화
 		map[tem.x][tem.y][tem.z].d|=PLAGUE;
-    }else
+
+		m.x = 0;
+		m.y = 0;
+		m.z = 0;
+
+	}else
 	{
 		//중복devil을 저장한 devil_list 비우기
 		while(!list_empty(&devil_list))
 			dev = devil_list_remove(dev);
 
 		//devil랜덤 이동 계산
-		tem.x=-(uniform(0,2,s->SEED_DVL_MOV_X)-1);
-		tem.y=-(uniform(0,2,s->SEED_DVL_MOV_Y)-1);
-		tem.z=-(uniform(0,2,s->SEED_DVL_MOV_Z)-1);
+		m.x=-(uniform(0,2,s->SEED_DVL_MOV_X)-1);
+		m.y=-(uniform(0,2,s->SEED_DVL_MOV_Y)-1);
+		m.z=-(uniform(0,2,s->SEED_DVL_MOV_Z)-1);
 		
-
-		//쓰레드 할당 준비
-		pthread_mutex_init(&lock,NULL);
-		i = 0;
-		j = 0; 
-		data[0] = (unsigned long)s;
-		data[3] = (unsigned long)&tem;
-		data[4] = (unsigned long)&lock;
-		
-		//데빌 이동 시작
-		while(i<totalTaskSize)
-		{
-			pthread_mutex_lock(&lock);
-			data[1] = (unsigned long)i;
-			data[2] = (unsigned long)avgTaskSize;
-
-			if(j==((s->core_num)-1))	//다른 코어는 전부 할당을 완료했다면
-			{
-				devil_size += devilMoveZTask((void*)data);
-
-			}else if(j==0)	//첫번째 쓰레드라면
-			{
-				data[2] += totalTaskSize%avgTaskSize;	//남는 잔여 task까지 부담시킨다
-				//쓰레드에 테스크 할당
-				pthread_create(&(thread[j]),NULL,devilMoveZTask,(void*)data);
-
-			}else
-			{
-				//쓰레드에 테스크 할당
-				pthread_create(&(thread[j]),NULL,devilMoveZTask,(void*)data);
-			}
-
-			//할당한 테스크 양 더하기
-			i += data[2];
-			j++;	//다음 코어로
-			
-		}
-		
-	
-		//데빌 이동 종료
-		for(i = 0;i<((s->core_num)-1);i++)
-		{
-			pthread_join(thread[i],&d_size);
-			devil_size += (int)d_size;
-		}
-		
-		i = 0;
-		j = 0;
-		//데빌 이동 확정 시작
-		while(i<totalTaskSize)
-		{
-			pthread_mutex_lock(&lock);
-			data[1] = (unsigned long)i;
-			data[2] = (unsigned long)avgTaskSize;
-
-			if(j==((s->core_num)-1))	//다른 코어는 전부 할당을 완료했다면
-			{
-				devil_size += devilMoveConfirm((void*)data);
-
-			}else if(j==0)	//첫번째 쓰레드라면
-			{
-				data[2] += totalTaskSize%avgTaskSize;	//남는 잔여 task까지 부담시킨다
-				//쓰레드에 테스크 할당
-				pthread_create(&(thread[j]),NULL,devilMoveConfirm,(void*)data);
-
-			}else
-			{
-				//쓰레드에 테스크 할당
-				pthread_create(&(thread[j]),NULL,devilMoveConfirm,(void*)data);
-			}
-
-			//할당한 테스크 양 더하기
-			i += data[2];
-			j++;	//다음 코어로
-			
-		}
-
-		for(i = 0;i<((s->core_num)-1);i++)
-		{
-			pthread_join(thread[i],&d_size);
-			devil_size += (int)d_size;
-		}
-		//데빌 이동 확정 종료
 	}
 
-	num = devil_size;
-	
-	/*
-	for(i=0;i<num;i++)
-	{
-		devil_init(s); 
-	}
-	*/
+	//데빌 이동 시작
+	allThreadLock(s);
+	pthread_cond_broadcast(&devilMoveCond);
+	allThreadUnlock(s);
+
+	//데빌 이동 종료
+	pthread_cond_wait(&threadDoneCond,&mainThreadLock);
+
+	//데빌 이동 확정 시작
+	allThreadLock(s);
+	pthread_cond_broadcast(&devilMoveConfirmCond);
+	allThreadUnlock(s);
+
+	//데빌 이동 확정 종료
+	pthread_cond_wait(&threadDoneCond,&mainThreadLock);
+
 	//현 데빌의 수만큼 데빌을 생성(데빌의 숫자는 2배가 됨)
-	if(num<(s->core_num*10))
-	{
-		for(i=0;i<num;i++)
-		{
-			devil_init(s); 
-		}
-	}else
-	{
-		j = num/s->core_num;
-		data[2] = (unsigned long)&lock;
-		for(i=0;i<s->core_num;i++)
-		{
-			pthread_mutex_lock(&lock);
-			data[0] = j;
-			data[1] = (unsigned long)s;
-			if(i==0)
-			{
-				data[0] += num%s->core_num;
-				pthread_create(&(thread[i]),NULL,devilCopyTask,(void*)data);
-			}else if(i==s->core_num-1)
-			{
-				devilCopyTask((void*)data);
-			}else
-			{
-				pthread_create(&(thread[i]),NULL,devilCopyTask,(void*)data);
-			}
-		}
-		
-		for(i = 0;i<s->core_num;i++)
-		{
-			pthread_join(thread[i],NULL);
-		}
-		devil_size += num;
-	}
+	pthread_cond_broadcast(&devilCopyCond);
+
+	//데빌 복제 종료
+	pthread_cond_wait(&threadDoneCond,&mainThreadLock);
+	devil_size *= 2;
 }
 
 void live_dead_stage (struct setup *s) {
-	int i,j,k;
-	pthread_mutex_t lock;
-	unsigned long data[4];
+	int i;
+	//셀 체크 시작
+	pthread_cond_broadcast(&cellCheckCond);
 
-	//쓰레드 할당 준비
-	pthread_mutex_init(&lock,NULL);
-	i = 0;
-	j = 0; 
-	data[0] = (unsigned long)s;
-	data[3] = (unsigned long)&lock;
+	//셀 체크 종료
+	pthread_cond_wait(&threadDoneCond,&mainThreadLock);
 
 	//셀 체크 시작
-	while(i<totalTaskSize)
-	{
-		pthread_mutex_lock(&lock);
-		data[1] = (unsigned long)i;
-		data[2] = (unsigned long)avgTaskSize;
+	pthread_cond_broadcast(&cellConfirmCond);
 
-		if(j==((s->core_num)-1))	//다른 코어는 전부 할당을 완료했다면
-		{
-			cellCheckTask((void*)data);
+	//셀 체크 종료
+	pthread_cond_wait(&threadDoneCond,&mainThreadLock);
 
-		}else if(j==0)	//첫번째 쓰레드라면
-		{
-			data[2] += totalTaskSize%avgTaskSize;	//남는 잔여 task까지 부담시킨다
-			//쓰레드에 테스크 할당
-			pthread_create(&(thread[j]),NULL,cellCheckTask,(void*)data);
-
-		}else
-		{
-			//쓰레드에 테스크 할당
-			pthread_create(&(thread[j]),NULL,cellCheckTask,(void*)data);
-		}
-
-		//할당한 테스크 양 더하기
-		i += data[2];
-		j++;	//다음 코어로
-
-	}
-
-	for(i = 0; i<(s->core_num-1);i++)
-	{
-		pthread_join(thread[i],NULL);
-	}
-
-	//확인이 끝나면 변경해야 될 셀들을 찾아서 변경
-	for(i = 0;i<s->map_size;i++)
-	{
-		for(j=0;j<s->map_size;j++)
-		{
-			for(k=0;k<s->map_size;k++)
-			{
-				if(IsChange(map[i][j][k].d))
-				{
-					map[i][j][k].d ^= LIVE;	//live는 dead로 dead 는 live로
-					map[i][j][k].d ^= CHANGE;	//Change flag 제거
-				}
-			}
-		}
-	}
 }
 
 void plague_stage (struct setup *s) {
-	
 }
 
 void angel_stage (struct setup *s) {
@@ -899,72 +961,25 @@ void angel_stage (struct setup *s) {
 
 	int x,y,z;
 	int i,j,k,p,q,r,num, biggest=0;
-	int xP=0,xM=0,yP=0,yM=0,zP=0,zM=0;
-	int * result;
 
 	struct devil * dev;
 	struct list_elem * dev_el;
-	pthread_mutex_t lock;
-	unsigned long data[7];
 
+	xP=0;
+	xM=0;
+	yP=0;
+	yM=0;
+	zP=0;
+	zM=0;
 
 	if((moveLength/2)>scope)
 		scope = moveLength/2;
-	
-	//쓰레드 할당 준비
-	pthread_mutex_init(&lock,NULL);
-	i = 0;
-	j = 0; 
-	data[0] = (unsigned long)s;
-	data[3] = (unsigned long)&lock;
 
 	//셀 체크 시작
-	while(i<totalTaskSize)
-	{
-		pthread_mutex_lock(&lock);
-		data[1] = (unsigned long)i;
-		data[2] = (unsigned long)avgTaskSize;
+	pthread_cond_broadcast(&angelSearchCond);
 
-		if(j==((s->core_num)-1))	//다른 코어는 전부 할당을 완료했다면
-		{
-			result = angelSearchTask((void*)data);
-			xP += result[0];
-			xM += result[1];
-			yP += result[2];
-			yM += result[3];
-			zP += result[4];
-			zM += result[5];
-			free(result);
-		}else if(j==0)	//첫번째 쓰레드라면
-		{
-			data[2] += totalTaskSize%avgTaskSize;	//남는 잔여 task까지 부담시킨다
-			//쓰레드에 테스크 할당
-			pthread_create(&(thread[j]),NULL,angelSearchTask,(void*)data);
-
-		}else
-		{
-			//쓰레드에 테스크 할당
-			pthread_create(&(thread[j]),NULL,angelSearchTask,(void*)data);
-		}
-
-		//할당한 테스크 양 더하기
-		i += data[2];
-		j++;	//다음 코어로
-
-	}
-
-	for(i = 0; i<(s->core_num-1);i++)
-	{
-		pthread_join(thread[i],&result);
-		xP += result[0];
-		xM += result[1];
-		yP += result[2];
-		yM += result[3];
-		zP += result[4];
-		zM += result[5];
-		free(result);
-	}
-
+	//셀 체크 종료
+	pthread_cond_wait(&threadDoneCond,&mainThreadLock);
 
 	if(!list_empty(&devil_list))	//만약 데빌 중복이 존재한다면
 	{
