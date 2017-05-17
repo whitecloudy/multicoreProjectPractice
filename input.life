@@ -1,6 +1,6 @@
 core_number	2
 total_steps	20
-map_size	100
+map_size	300
 dead_min	5 
 dead_max	20 
 live_min	10

@@ -74,21 +74,30 @@ int yM;
 int zP;
 int zM;
 
-int threadDone = 0;
-pthread_mutex_t done_mutex;
-
 pthread_mutex_t angelCheck;
 
-pthread_mutex_t * thread_mutex;
-
+/*
 pthread_cond_t devilMoveCond;
+pthread_mutex_t devilMoveM;
 pthread_cond_t devilMoveConfirmCond;
+pthread_mutex_t devilMoveConfirmM;
 pthread_cond_t devilCopyCond;
+pthread_mutex_t devilCopyM;
 pthread_cond_t cellCheckCond;
+pthread_mutex_t cellCheckM;
 pthread_cond_t cellConfirmCond;
+pthread_mutex_t cellConfirmM;
 pthread_cond_t angelSearchCond;
+pthread_mutex_t angelSearchM;
 pthread_cond_t threadDoneCond;
+*/
 
+pthread_barrier_t devilMoveBar;
+pthread_barrier_t devilMoveConfirmBar;
+pthread_barrier_t devilCopyBar;
+pthread_barrier_t cellCheckBar;
+pthread_barrier_t cellConfirmBar;
+pthread_barrier_t angelSearchBar;
 
 /***************************************
  * 3차원 메모리를 동적할당
@@ -623,28 +632,6 @@ static void key_destroy(void * buf)
 	free(buf);
 }
 
-void allThreadLock(struct setup * s)
-{
-	int i;
-	for(i=0;i<s->core_num;i++)
-	{
-		printf("2\n");
-		pthread_mutex_lock(&(thread_mutex[i]));
-		printf("2\n");
-	}
-}
-
-void allThreadUnlock(struct setup * s)
-{
-	int i;
-	for(i=0;i<s->core_num;i++)
-	{
-		printf("5\n");
-		pthread_mutex_unlock(&(thread_mutex[i]));
-		printf("6\n");
-	}
-}
-
 void * thread_running(void * data)
 {
 	const struct setup * s = (struct setup *)((unsigned long *)data)[0];
@@ -657,92 +644,36 @@ void * thread_running(void * data)
 
 	pthread_mutex_unlock(dataMutex);
 
-	pthread_mutex_t * threadMutex = &(thread_mutex[thread_num]);
-
 	while(1)
 	{
-		printf("1\n");
-		pthread_cond_wait(&devilMoveCond,threadMutex);
-		printf("3\n");
+		pthread_barrier_wait(&devilMoveBar);
 		devilMoveZTask(s,start,size);
-		pthread_mutex_lock(&done_mutex);
-		threadDone++;
-		if(threadDone == s->core_num)
-		{
-			pthread_mutex_lock(&mainThreadLock);
-			pthread_cond_signal(&threadDoneCond);
-			pthread_mutex_unlock(&mainThreadLock);
-			threadDone = 0;
-		}
-		pthread_mutex_unlock(&done_mutex);
-		
-		pthread_cond_wait(&devilMoveConfirmCond,threadMutex);
-		devilMoveConfirm(s,start,size);
-		pthread_mutex_lock(&done_mutex);
-		threadDone++;
-		if(threadDone == s->core_num)
-		{
-			pthread_mutex_lock(&mainThreadLock);
-			pthread_cond_signal(&threadDoneCond);
-			pthread_mutex_unlock(&mainThreadLock);
-			threadDone = 0;
-		}
-		pthread_mutex_unlock(&done_mutex);
+		pthread_barrier_wait(&devilMoveBar);
 
-		pthread_cond_wait(&devilCopyCond,threadMutex);
+		pthread_barrier_wait(&devilMoveConfirmBar);
+		devilMoveConfirm(s,start,size);
+		pthread_barrier_wait(&devilMoveConfirmBar);	
+		
+		pthread_barrier_wait(&devilCopyBar);
 		if(thread_num < devil_size%(s->core_num))
 			devilCopyTask(s,devil_size/(s->core_num) + 1);
 		else
 			devilCopyTask(s,devil_size/(s->core_num));
-		pthread_mutex_lock(&done_mutex);
-		threadDone++;
-		if(threadDone == s->core_num)
-		{
-			pthread_mutex_lock(&mainThreadLock);
-			pthread_cond_signal(&threadDoneCond);
-			pthread_mutex_unlock(&mainThreadLock);
-			threadDone = 0;
-		}
-		pthread_mutex_unlock(&done_mutex);
+		pthread_barrier_wait(&devilCopyBar);
 
-		pthread_cond_wait(&cellCheckCond,threadMutex);
+		pthread_barrier_wait(&cellCheckBar);
 		cellCheckTask(s,start,size);
-		pthread_mutex_lock(&done_mutex);
-		threadDone++;
-		if(threadDone == s->core_num)
-		{
-			pthread_mutex_lock(&mainThreadLock);
-			pthread_cond_signal(&threadDoneCond);
-			pthread_mutex_unlock(&mainThreadLock);
-			threadDone = 0;
-		}
-		pthread_mutex_unlock(&done_mutex);
+		pthread_barrier_wait(&cellCheckBar);
 
-		pthread_cond_wait(&cellConfirmCond,threadMutex);
+
+		pthread_barrier_wait(&cellConfirmBar);
 		cellConfirm(s,start,size);
-		pthread_mutex_lock(&done_mutex);
-		threadDone++;
-		if(threadDone == s->core_num)
-		{
-			pthread_mutex_lock(&mainThreadLock);
-			pthread_cond_signal(&threadDoneCond);
-			pthread_mutex_unlock(&mainThreadLock);
-			threadDone = 0;
-		}
-		pthread_mutex_unlock(&done_mutex);
+		pthread_barrier_wait(&cellConfirmBar);
 
-		pthread_cond_wait(&angelSearchTask,threadMutex);
+
+		pthread_barrier_wait(&angelSearchBar);
 		angelSearchTask(s,start,size);
-		pthread_mutex_lock(&done_mutex);
-		threadDone++;
-		if(threadDone == s->core_num)
-		{
-			pthread_mutex_lock(&mainThreadLock);
-			pthread_cond_signal(&threadDoneCond);
-			pthread_mutex_unlock(&mainThreadLock);
-			threadDone = 0;
-		}
-		pthread_mutex_unlock(&done_mutex);
+		pthread_barrier_wait(&angelSearchBar);
 
 	}
 
@@ -764,11 +695,10 @@ void thread_create(struct setup * s)
 	data[2] = (unsigned long)avgTaskSize;
 	data[3] = (unsigned long)(&dataMutex);
 
-	thread_mutex = (pthread_mutex_t*)malloc(sizeof(pthread_mutex_t)*(s->core_num));
-
 	for( i=0 ; i<s->core_num ; i++ )
 	{
 		pthread_mutex_lock(&dataMutex);
+
 		data[1] = taskSize;
 		data[4] = i;
 		if(i<restTaskSize)
@@ -782,11 +712,9 @@ void thread_create(struct setup * s)
 			pthread_create(&thread[i],NULL,thread_running,(void*)data);
 			taskSize += data[2];
 		}
-		pthread_mutex_init(&(thread_mutex[i]),NULL);
-		pthread_mutex_lock(&(thread_mutex[i]));
 	}
+
 	pthread_mutex_lock(&dataMutex);
-	pthread_cond_init(&threadDoneCond,NULL);
 }
 
 void thread_kill(struct setup * s)
@@ -848,18 +776,28 @@ void init_resources (struct setup *s) {
 
 	pthread_mutex_init(&uniform_lock,NULL);
 	pthread_mutex_init(&mutex_list_lock,NULL);
-	pthread_mutex_init(&mainThreadLock,NULL);
 	pthread_mutex_init(&angelCheck,NULL);
-	pthread_mutex_init(&done_mutex,NULL);
-
+/*
 	pthread_cond_init(&devilMoveCond,NULL);
+	pthread_mutex_init(&devilMoveConfirmM,NULL);
 	pthread_cond_init(&devilMoveConfirmCond,NULL);
+	pthread_mutex_init(&devilMoveConfirmM,NULL);
 	pthread_cond_init(&devilCopyCond,NULL);
+	pthread_mutex_init(&devilCopyM,NULL);
 	pthread_cond_init(&cellCheckCond,NULL);
+	pthread_mutex_init(&cellCheckM,NULL);
 	pthread_cond_init(&cellConfirmCond,NULL);
+	pthread_mutex_init(&cellConfirmM,NULL);
 	pthread_cond_init(&angelSearchCond,NULL);
+	pthread_mutex_init(&angelSearchM,NULL);
+*/
 
-	pthread_mutex_lock(&mainThreadLock);
+	pthread_barrier_init(&devilMoveBar,NULL,(s->core_num) + 1);
+	pthread_barrier_init(&devilMoveConfirmBar,NULL,(s->core_num) + 1);
+	pthread_barrier_init(&devilCopyBar,NULL,(s->core_num) + 1);
+	pthread_barrier_init(&cellCheckBar,NULL,(s->core_num) + 1);
+	pthread_barrier_init(&cellConfirmBar,NULL,(s->core_num) + 1);
+	pthread_barrier_init(&angelSearchBar,NULL,(s->core_num) + 1);
 
 	//angel 좌표 초기화
 	angel.x = p;
@@ -881,7 +819,6 @@ void init_resources (struct setup *s) {
 }
 
 void devil_stage (struct setup *s) {
-	int i;
 	struct unit tem;
 	struct devil * dev = list_entry(list_begin(&devil_list),struct devil,el);
 
@@ -908,47 +845,41 @@ void devil_stage (struct setup *s) {
 		m.x=-(uniform(0,2,s->SEED_DVL_MOV_X)-1);
 		m.y=-(uniform(0,2,s->SEED_DVL_MOV_Y)-1);
 		m.z=-(uniform(0,2,s->SEED_DVL_MOV_Z)-1);
-		
+
 	}
 
 	//데빌 이동 시작
-	allThreadLock(s);
-	pthread_cond_broadcast(&devilMoveCond);
-	allThreadUnlock(s);
+	pthread_barrier_wait(&devilMoveBar);
 
 	//데빌 이동 종료
-	pthread_cond_wait(&threadDoneCond,&mainThreadLock);
+	pthread_barrier_wait(&devilMoveBar);	
 
 	//데빌 이동 확정 시작
-	allThreadLock(s);
-	pthread_cond_broadcast(&devilMoveConfirmCond);
-	allThreadUnlock(s);
+	pthread_barrier_wait(&devilMoveConfirmBar);
 
 	//데빌 이동 확정 종료
-	pthread_cond_wait(&threadDoneCond,&mainThreadLock);
+	pthread_barrier_wait(&devilMoveConfirmBar);
 
 	//현 데빌의 수만큼 데빌을 생성(데빌의 숫자는 2배가 됨)
-	pthread_cond_broadcast(&devilCopyCond);
+	pthread_barrier_wait(&devilCopyBar);
 
 	//데빌 복제 종료
-	pthread_cond_wait(&threadDoneCond,&mainThreadLock);
+	pthread_barrier_wait(&devilCopyBar);
 	devil_size *= 2;
 }
 
 void live_dead_stage (struct setup *s) {
-	int i;
 	//셀 체크 시작
-	pthread_cond_broadcast(&cellCheckCond);
+	pthread_barrier_wait(&cellCheckBar);
+	
+	//셀 체크 종료
+	pthread_barrier_wait(&cellCheckBar);
+
+	//셀 체크 시작
+	pthread_barrier_wait(&cellConfirmBar);
 
 	//셀 체크 종료
-	pthread_cond_wait(&threadDoneCond,&mainThreadLock);
-
-	//셀 체크 시작
-	pthread_cond_broadcast(&cellConfirmCond);
-
-	//셀 체크 종료
-	pthread_cond_wait(&threadDoneCond,&mainThreadLock);
-
+	pthread_barrier_wait(&cellConfirmBar);
 }
 
 void plague_stage (struct setup *s) {
@@ -976,10 +907,10 @@ void angel_stage (struct setup *s) {
 		scope = moveLength/2;
 
 	//셀 체크 시작
-	pthread_cond_broadcast(&angelSearchCond);
+	pthread_barrier_wait(&angelSearchBar);
 
 	//셀 체크 종료
-	pthread_cond_wait(&threadDoneCond,&mainThreadLock);
+	pthread_barrier_wait(&angelSearchBar);
 
 	if(!list_empty(&devil_list))	//만약 데빌 중복이 존재한다면
 	{
