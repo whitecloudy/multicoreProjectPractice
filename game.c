@@ -3,6 +3,7 @@
 #include "./game.h"
 #include "./list.h"
 #include "./lcgrand.h"
+#include <omp.h>
 
 #define DEAD 0x0000
 #define LIVE 0x8000
@@ -427,95 +428,92 @@ void run_game (struct setup *s) {
 
 void devil_stage (struct setup *s) {
 	struct unit tem;
-	int i,j,k, num;
-	int is,js,ks;
-	int ic, jc,kc;
-	int ie,je,ke;
+	int i,j, num;
 	int x,y,z;
 	struct devil * dev = list_entry(list_begin(&devil_list),struct devil,el);
 
 
-
-	if(devil_size==0)//devil이 하나도 없는 상황
+#pragma omp parallel default(shared) private(tem) firstprivate(dev, s) private(i,j) num_threads(s->core_num)
 	{
-
-		//새로운 devil생성
-		tem = devil_init(s); 
-
-		//해당 devil지역 plague화
-		map[tem.x][tem.y][tem.z].d|=PLAGUE;
-	}else
-	{
-		//중복devil을 저장한 devil_list 비우기
-		while(!list_empty(&devil_list))
-			dev = devil_list_remove(dev);
-
-		//devil랜덤 이동 계산
-		x=-(uniform(0,2,s->SEED_DVL_MOV_X)-1);
-		y=-(uniform(0,2,s->SEED_DVL_MOV_Y)-1);
-		z=-(uniform(0,2,s->SEED_DVL_MOV_Z)-1);
-
-
-		//데빌 찾아서 이동
-		for(i=0 ; i!=s->map_size ; i++ )
+		if(devil_size==0)//devil이 하나도 없는 상황
 		{
-			for(j=0  ; j!=s->map_size ; j++ )
+#pragma omp single
 			{
-				for(k=0  ; k!=s->map_size ; k++ )
+				//새로운 devil생성
+				tem = devil_init(s); 
+
+				//해당 devil지역 plague화
+				map[tem.x][tem.y][tem.z].d|=PLAGUE;
+			}
+		}else
+		{
+#pragma omp single
+			{
+				//중복devil을 저장한 devil_list 비우기
+				while(!list_empty(&devil_list))
+					dev = devil_list_remove(dev);
+
+				//devil랜덤 이동 계산
+				x=-(uniform(0,2,s->SEED_DVL_MOV_X)-1);
+				y=-(uniform(0,2,s->SEED_DVL_MOV_Y)-1);
+				z=-(uniform(0,2,s->SEED_DVL_MOV_Z)-1);
+			}
+			//데빌 찾아서 이동
+#pragma omp for firstprivate(x,y,z)
+			for(i=0 ; i<(s->map_size * s->map_size) ; i++ )
+			{
+				for( j=0 ; j<s->map_size ; j++ )
 				{
-					if(NumOfDevil(map[i][j][k].d)>0)	//devil이 있으면
+					if(NumOfDevil(map[0][i][j].d)>0)	//devil이 있으면
 					{
-						tem.x = i;
-						tem.y = j;
-						tem.z = k;
+						tem.x = i/s->map_size;
+						tem.y = i%s->map_size;
+						tem.z = j;
 
 						//이동
 						unit_mov(s,x,y,z,&tem);
 
 						//movein에 devil 넣기
+						mapLock(&map[0][i][j]);
 						map[tem.x][tem.y][tem.z].d |= DEVIL_MOVEIN;
+						mapUnlock(&map[0][i][j]);
 					}
 				}
-
 			}
 
-		}
 
-		for(i=0 ; i!=s->map_size ; i++ )
-		{
-			for(j=0  ; j!=s->map_size ; j++ )
+			//데빌 이동 확정
+#pragma omp for firstprivate
+			for(i=0 ; i<(s->map_size * s->map_size) ; i++ )
 			{
-				for(k=0  ; k!=s->map_size ; k++ )
+				for( j=0 ; j<s->map_size ; j++ )
 				{
-					devil_size -= NumOfDevil(map[i][j][k].d);	//해당 위치에 데빌 전부 제외
-					map[i][j][k].d = EraseDevil(map[i][j][k].d);	//해당 위치의 데빌 전부 삭제
+					d_size -= NumOfDevil(map[0][i][j].d);	//해당 위치에 데빌 전부 제외
+					map[0][i][j].d = EraseDevil(map[0][i][j].d);	//해당 위치의 데빌 전부 삭제
 
-					if(IsDevilMoveIn(map[i][j][k].d))	//들어와야할 데빌이 존재하면
+					if(IsDevilMoveIn(map[0][i][j].d))	//들어와야할 데빌이 존재하면
 					{
-						devil_size ++;	//데빌 한마리 추가
-						map[i][j][k].d+=1;	//해당 위치에 데빌 한마리 추가
-						map[i][j][k].d ^= DEVIL_MOVEIN;	//무브인 0로 복귀
-						map[i][j][k].d |= PLAGUE;	//해당위치 플래그
+						d_size ++;	//데빌 한마리 추가
+						map[0][i][j].d+=1;	//해당 위치에 데빌 한마리 추가
+						map[0][i][j].d ^= DEVIL_MOVEIN;	//무브인 0로 복귀
+						map[0][i][j].d |= PLAGUE;	//해당위치 플래그
 					}
+
 				}
 
 			}
 
 		}
 
+		num = devil_size;
+
+		//현 데빌의 수만큼 데빌을 생성(데빌의 숫자는 2배가 됨)
+		for(i=0;i<num;i++)
+		{
+			tem = devil_init(s); 
+		}
+
 	}
-
-
-
-	num = devil_size;
-
-	//현 데빌의 수만큼 데빌을 생성(데빌의 숫자는 2배가 됨)
-	for(i=0;i<num;i++)
-	{
-		tem = devil_init(s); 
-	}
-
-
 
 }
 

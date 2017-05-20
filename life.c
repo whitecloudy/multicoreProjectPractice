@@ -32,6 +32,8 @@ int main (void) {
 	sleep(5);
 
 	end();
+
+	return 0;
 }
 
 static void initialize (void) {
