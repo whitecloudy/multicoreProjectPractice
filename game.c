@@ -76,22 +76,6 @@ int zM;
 
 pthread_mutex_t angelCheck;
 
-/*
-pthread_cond_t devilMoveCond;
-pthread_mutex_t devilMoveM;
-pthread_cond_t devilMoveConfirmCond;
-pthread_mutex_t devilMoveConfirmM;
-pthread_cond_t devilCopyCond;
-pthread_mutex_t devilCopyM;
-pthread_cond_t cellCheckCond;
-pthread_mutex_t cellCheckM;
-pthread_cond_t cellConfirmCond;
-pthread_mutex_t cellConfirmM;
-pthread_cond_t angelSearchCond;
-pthread_mutex_t angelSearchM;
-pthread_cond_t threadDoneCond;
-*/
-
 pthread_barrier_t devilMoveBar;
 pthread_barrier_t devilMoveConfirmBar;
 pthread_barrier_t devilCopyBar;
