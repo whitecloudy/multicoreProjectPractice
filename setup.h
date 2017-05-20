@@ -2,6 +2,8 @@
 #define __LIB_SETUP_H__
 
 struct setup {
+	int core_num;
+	int total_loop;
 	int map_size;
 	int dead_min;
 	int dead_max;
@@ -17,3 +19,4 @@ struct setup {
 };
 
 #endif
+

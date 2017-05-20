@@ -413,6 +413,18 @@ void init_resources (struct setup *s) {
 	list_init(&devil_list);
 }
 
+void run_game (struct setup *s) {
+	int i = 0;
+
+	while(i++ < s->total_loop) {
+		devil_stage(s);
+		live_dead_stage(s);
+		plague_stage(s);
+		angel_stage(s);
+	}
+}
+
+
 void devil_stage (struct setup *s) {
 	struct unit tem;
 	int i,j,k, num;
