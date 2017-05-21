@@ -5,7 +5,7 @@ lcgrand.o: lcgrand.c lcgrand.h
 list.o: list.c list.h
 	gcc -g -c list.c list.h
 game.o: game.c game.h
-	gcc -g -c game.c game.h
+	gcc -g -Wall -fopenmp -c game.c game.h
 
 clean:
 	rm *.o

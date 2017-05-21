@@ -47,6 +47,8 @@ struct list devil_list;
 int devil_size=0;
 int start = 0;
 
+omp_lock_t uniformLock;
+
 /***************************************
  * 3차원 메모리를 동적할당
  * num : 한변 길이
@@ -94,10 +96,13 @@ struct unit devil_init(struct setup *s)
 	struct unit d;
 	struct devil * dev;
 	//devil의 초기 위치 설정
+	omp_set_lock(&uniformLock);
 	d.x = uniform(0,s->map_size-1,s->SEED_DVL_GEN_X);
 	d.y = uniform(0,s->map_size-1,s->SEED_DVL_GEN_Y);
 	d.z = uniform(0,s->map_size-1,s->SEED_DVL_GEN_Z);
+	omp_unset_lock(&uniformLock);
 	//devil 맵 입력
+	mapLock(&map[d.x][d.y][d.z]);
 	if(IsDevilFull(map[d.x][d.y][d.z].d))	//데빌 넣을 공간이 없다면
 	{
 		dev = (struct devil*)malloc(sizeof(struct devil));
@@ -107,9 +112,7 @@ struct unit devil_init(struct setup *s)
 		list_push_back(&devil_list,&(dev->el));
 	}else
 		map[d.x][d.y][d.z].d += 1;
-
-	//devil 사이즈 증가
-	devil_size++;
+	mapUnlock(&map[d.x][d.y][d.z]);
 
 	return d;
 }
@@ -362,6 +365,9 @@ void pos_print(struct setup * s, FILE * save)
 	}
 }
 
+/**********************************************
+ * 해당 맵 타일을 잠구는 함수
+ * *******************************************/
 void mapLock(struct MAP * cor)
 {
 	while(IsMapLock(cor->d))
@@ -369,6 +375,9 @@ void mapLock(struct MAP * cor)
 	cor->d ^= MAP_LOCK;
 }
 
+/**********************************************
+ * 해당 맵 타일을 해제하는 함수
+ * *******************************************/
 void mapUnlock(struct MAP * cor)
 {
 	cor->d &= 0xF7FF;
@@ -406,12 +415,18 @@ void init_resources (struct setup *s) {
 
 	//새로운 devil생성
 	tem = devil_init(s); 
+	devil_size++;
 
 	//해당 devil지역 plague화
 	map[tem.x][tem.y][tem.z].d|=PLAGUE;
 
 	//데빌 리스트 초기화
 	list_init(&devil_list);
+
+	//멀티쓰레딩 준비
+	omp_set_num_threads(s->core_num);
+	omp_set_dynamic(0);
+	omp_init_lock(&uniformLock);
 }
 
 void run_game (struct setup *s) {
@@ -430,17 +445,19 @@ void devil_stage (struct setup *s) {
 	struct unit tem;
 	int i,j, num;
 	int x,y,z;
+	int d_size = 0;
 	struct devil * dev = list_entry(list_begin(&devil_list),struct devil,el);
 
 
-#pragma omp parallel default(shared) private(tem) firstprivate(dev, s) private(i,j) num_threads(s->core_num)
+#pragma omp parallel default(shared) private(tem) firstprivate(dev, s, map) private(i,j)
 	{
 		if(devil_size==0)//devil이 하나도 없는 상황
 		{
 #pragma omp single
 			{
 				//새로운 devil생성
-				tem = devil_init(s); 
+				tem = devil_init(s);
+				devil_size++;
 
 				//해당 devil지역 plague화
 				map[tem.x][tem.y][tem.z].d|=PLAGUE;
@@ -483,7 +500,7 @@ void devil_stage (struct setup *s) {
 
 
 			//데빌 이동 확정
-#pragma omp for firstprivate
+#pragma omp for reduction(+:d_size)
 			for(i=0 ; i<(s->map_size * s->map_size) ; i++ )
 			{
 				for( j=0 ; j<s->map_size ; j++ )
@@ -504,14 +521,21 @@ void devil_stage (struct setup *s) {
 			}
 
 		}
-
-		num = devil_size;
+#pragma omp single
+		{
+			devil_size += d_size;
+			d_size = 0;
+		}
 
 		//현 데빌의 수만큼 데빌을 생성(데빌의 숫자는 2배가 됨)
-		for(i=0;i<num;i++)
+#pragma omp for firstprivate(devil_size)
+		for(i=0;i<devil_size;i++)
 		{
-			tem = devil_init(s); 
+			devil_init(s);
 		}
+
+#pragma omp single
+		devil_size *= 2;
 
 	}
 
@@ -521,33 +545,39 @@ void live_dead_stage (struct setup *s) {
 	int i,j,k;
 	int leftCount, middleCount;
 	char leftP, middleP;
-	//각 셀을 돌아가면서 확인
-	for(i = 0;i<s->map_size;i++)
+
+#pragma omp parallel default(none) private(i,j,k,leftCount,middleCount,leftP,middleP) firstprivate(s, map)
 	{
-		for(j=0;j<s->map_size;j++)
+#pragma omp for
+		//각 셀을 돌아가면서 확인
+		for(i = 0;i<s->map_size;i++)
 		{
-			leftCount = -1;
-			middleCount = -1;
-			leftP = false;
-			middleP = false;
-			for(k=0;k<s->map_size;k++)
+			for(j=0;j<s->map_size;j++)
 			{
-				cell_check(s,i,j,k,&leftCount,&middleCount,&leftP,&middleP);
+				leftCount = -1;
+				middleCount = -1;
+				leftP = false;
+				middleP = false;
+				for(k=0;k<s->map_size;k++)
+				{
+					cell_check(s,i,j,k,&leftCount,&middleCount,&leftP,&middleP);
+				}
 			}
 		}
-	}
 
-	//확인이 끝나면 변경해야 될 셀들을 찾아서 변경
-	for(i = 0;i<s->map_size;i++)
-	{
-		for(j=0;j<s->map_size;j++)
+#pragma omp for
+		//확인이 끝나면 변경해야 될 셀들을 찾아서 변경
+		for(i = 0;i<s->map_size;i++)
 		{
-			for(k=0;k<s->map_size;k++)
+			for(j=0;j<s->map_size;j++)
 			{
-				if(IsChange(map[i][j][k].d))
+				for(k=0;k<s->map_size;k++)
 				{
-					map[i][j][k].d ^= LIVE;	//live는 dead로 dead 는 live로
-					map[i][j][k].d ^= CHANGE;	//Change flag 제거
+					if(IsChange(map[i][j][k].d))
+					{
+						map[i][j][k].d ^= LIVE;	//live는 dead로 dead 는 live로
+						map[i][j][k].d ^= CHANGE;	//Change flag 제거
+					}
 				}
 			}
 		}
@@ -563,6 +593,7 @@ void angel_stage (struct setup *s) {
 	int scope = devil_size/(5*(s->map_size)*(s->map_size));
 	int moveLength = s->map_size/10;
 
+	int d_size = 0;
 	int x,y,z;
 	int i,j,k,p,q,r,num, biggest=0;
 	int xP=0,xM=0,yP=0,yM=0,zP=0,zM=0;
@@ -573,161 +604,164 @@ void angel_stage (struct setup *s) {
 	if((moveLength/2)>scope)
 		scope = moveLength/2;
 
-	//각 데빌의 위치를 검색
-	for( i=0 ; i<s->map_size ; i++ )
+#pragma omp parallel private(num) firstprivate(s, map)
 	{
-		if(i==angel.x)	//엔젤 선상에 있는 데빌은 세지 않는다
-			continue;
-		for( j=0 ; j<s->map_size ; j++ )
+		//각 데빌의 위치를 검색
+#pragma omp for private(i,j,k) firstprivate(angel) reduction(+:xP,xM,yP,yM,zP,zM)
+		for( i=0 ; i<s->map_size ; i++ )
 		{
-			if(j==angel.y)
-				continue;
-			for( k=0 ; k<s->map_size ; k++ )
-			{
-				if(k==angel.z)
-					continue;
-				num = NumOfDevil(map[i][j][k].d);
-				if(num!=0)	//데빌 숫자가 0이 아니라면
+			if(i!=angel.x)	//엔젤 선상에 있는 데빌은 세지 않는다
+				for( j=0 ; j<s->map_size ; j++ )
 				{
-					if(i>angel.x)
+					if(j!=angel.y)
+						for( k=0 ; k<s->map_size ; k++ )
+						{
+							if(k!=angel.z)
+							{
+								num = NumOfDevil(map[i][j][k].d);
+								if(num!=0)	//데빌 숫자가 0이 아니라면
+								{
+									if(i>angel.x)
+										xP += num;
+									else
+										xM += num;
+
+									if(j>angel.y)
+										yP += num;
+									else
+										yM += num;
+
+									if(k>angel.z)
+										zP += num;
+									else
+										zM += num;
+								}
+							}
+						}
+				}
+		}
+
+#pragma omp single
+		{
+			if(!list_empty(&devil_list))	//만약 데빌 중복이 존재한다면
+			{
+				dev_el = list_begin(&devil_list);
+				while(list_end(&devil_list)!=dev_el) //만약 현 데빌이 마지막이라면 루프 탈출
+				{
+					dev = list_entry(dev_el,struct devil,el);
+
+					if(dev->u.x>angel.x)
 						xP += num;
-					else
+					else if(dev->u.x<angel.x)
 						xM += num;
 
-					if(j>angel.y)
+					if(dev->u.y>angel.y)
 						yP += num;
-					else
+					else if(dev->u.y<angel.y)
 						yM += num;
 
-					if(k>angel.z)
+					if(dev->u.z>angel.z)
 						zP += num;
-					else
+					else if(dev->u.z<angel.z)
 						zM += num;
+
+					dev_el = list_next(dev_el);
 				}
 			}
 
-		}
 
-	}
+			//최대값 검색
+			biggest = xP;
+			if(xM > biggest)
+				biggest = xM;
+			if(yP > biggest)
+				biggest = yP;
+			if(yM > biggest)
+				biggest = yM;
+			if(zP > biggest)
+				biggest = zP;
+			if(zM > biggest)
+				biggest = zM;
 
-	if(!list_empty(&devil_list))	//만약 데빌 중복이 존재한다면
-	{
-		dev_el = list_begin(&devil_list);
-		while(1)
-		{
-			if(list_end(&devil_list)==dev_el)	//만약 현 데빌이 마지막이라면 루프 탈출
-				break;
-
-			dev = list_entry(dev_el,struct devil,el);
-
-			if(dev->u.x>angel.x)
-				xP += num;
-			else if(dev->u.x<angel.x)
-				xM += num;
-
-			if(dev->u.y>angel.y)
-				yP += num;
-			else if(dev->u.y<angel.y)
-				yM += num;
-
-			if(dev->u.z>angel.z)
-				zP += num;
-			else if(dev->u.z<angel.z)
-				zM += num;
-
-
-			dev_el = list_next(dev_el);
-		}
-	}
-
-	//최대값 검색
-	biggest = xP;
-	if(xM > biggest)
-		biggest = xM;
-	if(yP > biggest)
-		biggest = yP;
-	if(yM > biggest)
-		biggest = yM;
-	if(zP > biggest)
-		biggest = zP;
-	if(zM > biggest)
-		biggest = zM;
-
-	//엔젤 좌표 이동
-	if(xP==biggest)
-	{
-		unit_mov(s,moveLength,0,0,&angel);	
-	}else if(yP==biggest)
-	{
-		unit_mov(s,0,moveLength,0,&angel);
-	}else if(zP==biggest)
-	{
-		unit_mov(s,0,0,moveLength,&angel);
-	}else if(xM==biggest)
-	{
-		unit_mov(s,-moveLength,0,0,&angel);
-	}else if(yM==biggest)
-	{
-		unit_mov(s,0,-moveLength,0,&angel);
-	}else if(zM==biggest)
-	{
-		unit_mov(s,0,0,-moveLength,&angel);
-	}
-
-	//scope 범위 저장
-	i = angel.x - scope;
-	j = angel.y - scope;
-	k = angel.z - scope;
-	p = angel.x + scope;
-	q = angel.y + scope;
-	r = angel.z + scope;
-
-	//scope 테두리 검사
-	if(i < 0)
-		i = 0;
-	else if( p>=s->map_size )
-		p = s->map_size-1;
-	if(j < 0)
-		j = 0;
-	else if( q>=s->map_size )
-		q = s->map_size-1;
-	if(k < 0)
-		k = 0;
-	else if( r>=s->map_size )
-		r = s->map_size-1;
-
-	//scope 지역 수색
-	for(x=i ; x<=p ; x++ )
-	{
-		for(y=j ; y<=q ;y++)
-		{
-			for(z=k ; z<=r ; z++ )
+			//엔젤 좌표 이동
+			if(xP==biggest)
 			{
-				devil_size -= NumOfDevil(map[x][y][z].d);
-				//데빌 삭제 및 플레그 제거
-				map[x][y][z].d = AngelCure(map[x][y][z].d);
+				unit_mov(s,moveLength,0,0,&angel);	
+			}else if(yP==biggest)
+			{
+				unit_mov(s,0,moveLength,0,&angel);
+			}else if(zP==biggest)
+			{
+				unit_mov(s,0,0,moveLength,&angel);
+			}else if(xM==biggest)
+			{
+				unit_mov(s,-moveLength,0,0,&angel);
+			}else if(yM==biggest)
+			{
+				unit_mov(s,0,-moveLength,0,&angel);
+			}else if(zM==biggest)
+			{
+				unit_mov(s,0,0,-moveLength,&angel);
+			}
+
+			//scope 범위 저장
+			i = angel.x - scope;
+			j = angel.y - scope;
+			k = angel.z - scope;
+			p = angel.x + scope;
+			q = angel.y + scope;
+			r = angel.z + scope;
+
+			//scope 테두리 검사
+			if(i < 0)
+				i = 0;
+			else if( p>=s->map_size )
+				p = s->map_size-1;
+			if(j < 0)
+				j = 0;
+			else if( q>=s->map_size )
+				q = s->map_size-1;
+			if(k < 0)
+				k = 0;
+			else if( r>=s->map_size )
+				r = s->map_size-1;
+
+		}
+
+		//scope 지역 수색
+#pragma omp for firstprivate(i,j,k,p,q,r) private(x,y,z) reduction(+: d_size)
+		for(x=i ; x<=p ; x++ )
+		{
+			for(y=j ; y<=q ;y++)
+			{
+				for(z=k ; z<=r ; z++ )
+				{
+					d_size -= NumOfDevil(map[x][y][z].d);
+					//데빌 삭제 및 플레그 제거
+					map[x][y][z].d = AngelCure(map[x][y][z].d);
+				}
 			}
 		}
 	}
-
-	if(!list_empty(&devil_list))	//만약 데빌 중복이 존재한다면
 	{
-		dev_el = list_begin(&devil_list);
+		devil_size += d_size;
 
-		dev = list_entry(list_begin(&devil_list),struct devil,el);
-		while(1)
+		if(!list_empty(&devil_list))	//만약 데빌 중복이 존재한다면
 		{
-			if(list_end(&devil_list)==dev_el)	//만약 현 데빌이 마지막이라면 루프 탈출
-				break;
-			dev = list_entry(dev_el ,struct devil, el);
+			dev_el = list_begin(&devil_list);
 
-			if((dev->u.x >= i)&&(dev->u.x <= p)&&(dev->u.y >= j)&&(dev->u.y <= q)&&(dev->u.z >= k)&&(dev->u.z <= r))
-				devil_list_remove(dev);
+			dev = list_entry(list_begin(&devil_list),struct devil,el);
+			while(list_end(&devil_list)!=dev_el)	//만약 현 데빌이 마지막이라면 루프 탈출
+			{
+				dev = list_entry(dev_el ,struct devil, el);
 
-			dev_el = list_next(dev_el);
+				if((dev->u.x >= i)&&(dev->u.x <= p)&&(dev->u.y >= j)&&(dev->u.y <= q)&&(dev->u.z >= k)&&(dev->u.z <= r))
+					devil_list_remove(dev);
+
+				dev_el = list_next(dev_el);
+			}
 		}
 	}
-
 }
 
 
@@ -762,6 +796,7 @@ void free_resources (struct setup *s) {
 	//중복devil을 저장한 devil_list 비우기
 	while(!list_empty(&devil_list))
 		dev = devil_list_remove(dev);
+	omp_destroy_lock(&uniformLock);
 
 	free_3d(map);
 }
