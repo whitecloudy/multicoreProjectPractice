@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <mpi.h>
 #include "./game.h"
 #include "./list.h"
 #include "./lcgrand.h"
@@ -23,6 +24,8 @@
 #define EraseDevil(x) (x&0xF800)
 #define AngelCure(x) (x&0xC800)
 
+#define cor(n, x, y, z) ((x)*(n)*(n) + (y)*(n) + (z))
+
 struct unit
 {
 	int x;
@@ -40,48 +43,16 @@ struct devil
 	struct list_elem el;
 };
 
-struct MAP *** map;
+struct MAP * map;
 struct unit angel;
 struct list devil_list;
 int devil_size=0;
-int start = 0;
 
-/***************************************
- * 3차원 메모리를 동적할당
- * num : 한변 길이
- * size : 한 block의 데이터 크기
- * **************************************/
-void *** malloc_3d(int num,int size)
-{
-	void *** data;
-	int i, j;
-	data = (void***)malloc(sizeof(void**)*num);
-	data[0] = (void**)malloc(sizeof(void*)*num*num);
-	data[0][0] = (void*)malloc(size*num*num*num);
-	for (i = 1; i < num; i++)
-	{
-		data[i] = data[i - 1] + num;
-		data[i][0] = (unsigned long)data[i - 1][0] + (unsigned long)(num*num*size);
-	}
-	for (i = 0; i < num; i++)
-	{
-		for (j = 1; j < num; j++)
-		{
-			data[i][j] = (unsigned long)data[i][j - 1] + (unsigned long)(num*size);
-		}
-	}
-	return data;
-}
+int start;
+int rank;
+int total;
+int size;
 
-/*********************************************
- * 3차원 메모리 동적할당 해제
- * ******************************************/
-void free_3d(void *** data)
-{
-	free(data[0][0]);
-	free(data[0]);
-	free(data);
-}
 /************************************************
  * Devil의 생성 및 초기화
  * s : 해당 setup
@@ -97,18 +68,6 @@ struct unit devil_init(struct setup *s)
 	d.y = uniform(0,s->map_size-1,s->SEED_DVL_GEN_Y);
 	d.z = uniform(0,s->map_size-1,s->SEED_DVL_GEN_Z);
 	//devil 맵 입력
-	if(IsDevilFull(map[d.x][d.y][d.z].d))	//데빌 넣을 공간이 없다면
-	{
-		dev = (struct devil*)malloc(sizeof(struct devil));
-		dev->u.x = d.x;
-		dev->u.y = d.y;
-		dev->u.z = d.z;
-		list_push_back(&devil_list,&(dev->el));
-	}else
-		map[d.x][d.y][d.z].d += 1;
-
-	//devil 사이즈 증가
-	devil_size++;
 
 	return d;
 }
@@ -373,38 +332,153 @@ void mapUnlock(struct MAP * cor)
 	cor->d &= 0xF7FF;
 }
 
+//유닛을 보내는 함수
+struct unit unit_comm(const struct setup * s, const unit * data)
+{
+	int round;
+	int location;
+	struct unit data_buf;
+	if(data == NULL)
+	{
+		MPI_Recv(&round, 1, MPI_INT, (rank + total - 1)%total, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+		MPI_Recv(&data_buf, 3, MPI_INT, (rank + total - 1)%total, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+		round ++;
+		if(round != total)
+		{
+			MPI_Send(&round, 1, MPI_INT, (rank + 1)%total, 2, MPI_COMM_WORLD);
+			MPI_Send(&data_buf, 3, MPI_INT, (rank + 1)%total, 3, MPI_COMM_WORLD);
+		}
+
+		location = data_buf.x * s->map_size + data_buf.y;
+		if((location >= start) && (location < (start + size)))	//이 코어의 unit인 경우
+			return data;
+		else
+			return NULL;
+	}else	//최초로 보내는 코어인 경우
+	{
+		round = 1;
+		MPI_Send(&round, 1, MPI_INT, (rank + 1)%total, 2, MPI_COMM_WORLD);
+		MPI_Send(&data, 3, MPI_INT, (rank + 1)%total, 3, MPI_COMM_WORLD);
+
+		location = data_buf.x * s->map_size + data_buf.y;
+		if((location >= start) && (location < (start + size)))	//이 코어의 unit인 경우
+			return data;
+		else
+			return NULL;
+
+	}
+}
+
 //임의 정의 함수
 /////////////////////////////////////////////////////////////////////////////////
 //기존 정의 함수
+
+void run_game (struct setup *s) {
+	int i = 0;
+
+	while(i++ < s->total_loop) {
+		devil_stage(s);
+		live_dead_stage(s);
+		plague_stage(s);
+		angel_stage(s);
+#include <mpi.h>
+	}
+}
 
 void init_resources (struct setup *s) {
 	int i,j,k;
 	int p = (s->map_size/2)-1;
 	struct unit tem;
+	unsigned short * tem_data;
+
+	MPI_Comm_size(MPI_COMM_WORLD, &total);
+	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+	//이 코어가 감당해야 할 데이터 크기 계산
+	size = ((s->map_size)*(s->map_size)/total);
+	if(rank < (s->map_size)*(s->map_size)%total)
+		size++;
+
+	//앞의 코어로 부터 현 코어의 시작점을 넘겨받는다
+	if(rank != 0)
+		MPI_Recv(start, 1, MPI_INT, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+	else
+		start = 0;
+
+	//다음 코어에게 현 코어의 시작점에 사이즈를 더하여 다음코어의 시작점을 알려준다.
+	if(rank != (total-1))
+		MPI_Send(start + size, 1, MPI_INT, rank + 1, 0, MPI_COMM_WORLD);
+
 
 	//맵 데이터 동적할당
-	map = (struct MAP ***)malloc_3d(s->map_size,sizeof(struct MAP));
+	map = (struct MAP *)malloc(sizeof(struct MAP) * size * s->map_size);
+	tem_data = (unsigned short * )malloc(sizeof(unsigned short) * s->map_size);
 
-	//맵 이니셜라이징
-	for(i = 0; i<s->map_size;i++)
-	{ 
-		for(j=0;j<s->map_size;j++)
+	if(rank == 0)
+	{
+		//맵 이니셜라이징
+		for(i = 0; i<s->map_size;i++)
 		{ 
-			for(k=0;k<s->map_size;k++)
+			for(j=0;j<s->map_size;j++)
+			{	 
+				for(k=0;k<s->map_size;k++)
+				{
+					tem_data[k] = (unsigned short)uniform(0,1,s->SEED_MAP)<<(sizeof(MAP)*8-1);
+				}
+
+				if((i* s->map_size + j) < size)	//계산한 LD가 해당 코어의 것인 경우
+				{
+					memcpy(&map[cor(map_size, i, j, 0)],tem_data, sizeof(unsigned short) * s->map_size);
+				}else	//이 코어것이 아닌경우
+				{
+					MPI_Send(tem_data, s->map_size, MPI_UNSIGNED_SHORT, rank + 1, 1, MPI_COMM_WORLD);
+				}
+			}
+		}
+
+		//초기 LD셋팅 종료 시그널을 싣어 보낸다
+		tem_data[0] = 1;
+		MPI_Send(tem_data, s->map_size, MPI_UNSIGNED_SHORT, rank+1, 1, MPI_COMM_WORLD);
+	}else	//rank가 0이 아니라면
+	{
+		for(i = 0; i<size; i++)
+		{
+			MPI_Recv(tem_data, s->map_size, MPI_UNSIGNED_SHORT, rank-1, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+			memcpy(&map[i], tem_data, sizeof(unsigned short) * s->map_size);
+		}
+
+		while(1)
+		{
+			MPI_Recv(tem_data, s->map_size, MPI_UNSIGNED_SHORT, rank-1, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+			if(rank != (total -1))	//rank가 마지막이 아니라면 바로 다음 rank로 데이터를 보내준다
+				MPI_Send(tem_data, s->map_size, MPI_UNSIGNED_SHORT, rank + 1, 1, MPI_COMM_WORLD);
+
+			if(tem_data[0] == 1)	//만약 데이터에 종료 시그널이 있다면 현 무한루프를 종료
 			{
-				map[i][j][k].d = (unsigned char)uniform(0,1,s->SEED_MAP)<<15;
+				break;
 			}
 		}
 
 	}
+
 
 	//angel 좌표 초기화
 	angel.x = p;
 	angel.y = p;
 	angel.z = p;
 
-	//새로운 devil생성
-	tem = devil_init(s); 
+	if(rank == 0)
+	{
+		//새로운 devil생성
+		tem = devil_init(s); 
+
+		tem = unit_comm(tem);
+	}else
+	{
+		tem = unit_comm(NULL);
+	}
+	///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 	//해당 devil지역 plague화
 	map[tem.x][tem.y][tem.z].d|=PLAGUE;
@@ -753,5 +827,5 @@ void free_resources (struct setup *s) {
 	while(!list_empty(&devil_list))
 		dev = devil_list_remove(dev);
 
-	free_3d(map);
+	free(map);
 }
